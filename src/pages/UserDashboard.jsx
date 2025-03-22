@@ -156,6 +156,22 @@ const UserDashboard = () => {
   
   return (
     <DashboardLayout>
+      {/* Header Wallet Connect Link */}
+      <div className="mb-6 flex justify-end">
+        <Link
+          to="/wallet-connection"
+          className="px-4 py-2 bg-gradient-to-r from-orion-darkGray to-orion-mediumGray text-white rounded-md shadow-sm text-sm font-medium hover:from-orion-darkGray hover:to-orion-darkGray focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-orion-darkGray transition-all flex items-center"
+          tabIndex="0"
+          aria-label="Connect wallet with MetaMask"
+        >
+          <svg className="mr-2 h-4 w-4" width="25" height="25" viewBox="0 0 25 25" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M21.875 10.9375H3.125C1.39911 10.9375 0 12.3366 0 14.0625V20.3125C0 22.0384 1.39911 23.4375 3.125 23.4375H21.875C23.6009 23.4375 25 22.0384 25 20.3125V14.0625C25 12.3366 23.6009 10.9375 21.875 10.9375Z" fill="white"/>
+            <path d="M21.875 1.5625H3.125C1.39911 1.5625 0 2.96161 0 4.6875V6.25C0 7.97589 1.39911 9.375 3.125 9.375H21.875C23.6009 9.375 25 7.97589 25 6.25V4.6875C25 2.96161 23.6009 1.5625 21.875 1.5625Z" fill="white"/>
+          </svg>
+          Connect Wallet
+        </Link>
+      </div>
+      
       {/* Welcome Section */}
       <div className="mb-8">
         <h1 className="text-2xl font-bold text-orion-darkGray mb-2">

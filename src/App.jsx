@@ -13,6 +13,7 @@ import AdminDashboard from './pages/AdminDashboard';
 import SubmitPaper from './pages/SubmitPaper';
 import MyPapers from './pages/MyPapers';
 import Profile from './pages/Profile';
+import WalletConnection from './pages/WalletConnection';
 import ProtectedRoute from './components/ProtectedRoute';
 import RoleBasedRoute from './components/RoleBasedRoute';
 
@@ -47,6 +48,7 @@ function App() {
               <Route path="/papers" element={<MyPapers />} />
               <Route path="/papers/:paperId" element={<MyPapers />} />
               <Route path="/profile" element={<Profile />} />
+              <Route path="/wallet-connection" element={<WalletConnection />} />
               
               {/* Committee routes */}
               <Route element={<RoleBasedRoute allowedRoles={['committee', 'admin']} />}>
