@@ -10,6 +10,9 @@ import Dashboard from './pages/Dashboard';
 import UserDashboard from './pages/UserDashboard';
 import CommitteeDashboard from './pages/CommitteeDashboard';
 import AdminDashboard from './pages/AdminDashboard';
+import SubmitPaper from './pages/SubmitPaper';
+import MyPapers from './pages/MyPapers';
+import Profile from './pages/Profile';
 import ProtectedRoute from './components/ProtectedRoute';
 import RoleBasedRoute from './components/RoleBasedRoute';
 
@@ -40,6 +43,10 @@ function App() {
             <Route element={<ProtectedRoute />}>
               <Route path="/dashboard" element={<Dashboard />} />
               <Route path="/user-dashboard" element={<UserDashboard />} />
+              <Route path="/submit-paper" element={<SubmitPaper />} />
+              <Route path="/papers" element={<MyPapers />} />
+              <Route path="/papers/:paperId" element={<MyPapers />} />
+              <Route path="/profile" element={<Profile />} />
               
               {/* Committee routes */}
               <Route element={<RoleBasedRoute allowedRoles={['committee', 'admin']} />}>
