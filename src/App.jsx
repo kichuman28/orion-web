@@ -1,6 +1,17 @@
 import { useState } from 'react';
+import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
+import { AuthProvider } from './contexts/AuthContext';
 import LandingPage from './pages/LandingPage';
 import SplashScreen from './components/SplashScreen';
+import Login from './pages/Login';
+import Signup from './pages/Signup';
+import ForgotPassword from './pages/ForgotPassword';
+import Dashboard from './pages/Dashboard';
+import UserDashboard from './pages/UserDashboard';
+import CommitteeDashboard from './pages/CommitteeDashboard';
+import AdminDashboard from './pages/AdminDashboard';
+import ProtectedRoute from './components/ProtectedRoute';
+import RoleBasedRoute from './components/RoleBasedRoute';
 
 function App() {
   const [showSplash, setShowSplash] = useState(true);
@@ -11,17 +22,39 @@ function App() {
   };
 
   return (
-    <>
-      {/* Always render the landing page behind the splash screen */}
-      <div className="relative z-0">
-        <LandingPage />
-      </div>
-      
-      {/* Overlay the splash screen with a higher z-index */}
-      {showSplash && (
-        <SplashScreen onComplete={handleSplashComplete} />
-      )}
-    </>
+    <Router>
+      <AuthProvider>
+        <div className="relative min-h-screen">
+          {showSplash && (
+            <SplashScreen onComplete={handleSplashComplete} />
+          )}
+          
+          <Routes>
+            {/* Public routes */}
+            <Route path="/" element={<LandingPage />} />
+            <Route path="/login" element={<Login />} />
+            <Route path="/signup" element={<Signup />} />
+            <Route path="/forgot-password" element={<ForgotPassword />} />
+            
+            {/* Protected routes that require authentication */}
+            <Route element={<ProtectedRoute />}>
+              <Route path="/dashboard" element={<Dashboard />} />
+              <Route path="/user-dashboard" element={<UserDashboard />} />
+              
+              {/* Committee routes */}
+              <Route element={<RoleBasedRoute allowedRoles={['committee', 'admin']} />}>
+                <Route path="/committee-dashboard" element={<CommitteeDashboard />} />
+              </Route>
+              
+              {/* Admin routes */}
+              <Route element={<RoleBasedRoute allowedRoles={['admin']} />}>
+                <Route path="/admin-dashboard" element={<AdminDashboard />} />
+              </Route>
+            </Route>
+          </Routes>
+        </div>
+      </AuthProvider>
+    </Router>
   );
 }
 

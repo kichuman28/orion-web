@@ -1,8 +1,10 @@
 import { useState, useEffect } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
 import OrionLogo from '../assets/OrionLogo';
 
 const Header = () => {
   const [scrolled, setScrolled] = useState(false);
+  const navigate = useNavigate();
   
   useEffect(() => {
     const handleScroll = () => {
@@ -19,6 +21,10 @@ const Header = () => {
     };
   }, [scrolled]);
   
+  const handleGetStarted = () => {
+    navigate('/login');
+  };
+  
   return (
     <header className="fixed top-0 left-0 w-full z-50 px-4 py-5">
       <div className="container mx-auto">
@@ -27,15 +33,15 @@ const Header = () => {
             ? "bg-white/90 backdrop-blur-sm rounded-xl shadow-lg" 
             : "bg-transparent"
         }`}>
-          <a 
-            href="#" 
+          <Link 
+            to="/" 
             className="flex items-center gap-3"
             tabIndex="0"
             aria-label="Go to home page"
           >
             <OrionLogo className="w-10 h-10 text-orion-darkGray" />
             <span className="font-bold text-2xl text-orion-darkGray">Orion</span>
-          </a>
+          </Link>
           
           <nav className="hidden md:flex gap-10 font-medium">
             <a 
@@ -66,6 +72,7 @@ const Header = () => {
           
           <div>
             <button 
+              onClick={handleGetStarted}
               className="bg-orion-darkGray text-white py-3 px-6 rounded-lg text-base font-medium hover:bg-orion-mediumGray transition-colors duration-300"
               tabIndex="0"
               aria-label="Get started with Orion"
