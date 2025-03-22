@@ -18,7 +18,7 @@ const SplashScreen = ({ onComplete }) => {
 
   return (
     <div 
-      className={`fixed inset-0 z-50 flex flex-col items-center justify-center bg-gradient-to-b from-orion-darkGray to-black transition-all duration-600 ${fadeOut ? 'opacity-0 scale-110' : 'opacity-100 scale-100'}`}
+      className={`fixed inset-0 z-[9999] flex flex-col items-center justify-center bg-gradient-to-b from-orion-darkGray to-black transition-all duration-600 ${fadeOut ? 'opacity-0 scale-110' : 'opacity-100 scale-100'}`}
     >
       <div className="flex flex-col items-center">
         {/* Logo with pulse and float animation */}

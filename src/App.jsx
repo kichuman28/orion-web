@@ -12,10 +12,14 @@ function App() {
 
   return (
     <>
-      {showSplash ? (
-        <SplashScreen onComplete={handleSplashComplete} />
-      ) : (
+      {/* Always render the landing page behind the splash screen */}
+      <div className="relative z-0">
         <LandingPage />
+      </div>
+      
+      {/* Overlay the splash screen with a higher z-index */}
+      {showSplash && (
+        <SplashScreen onComplete={handleSplashComplete} />
       )}
     </>
   );
