@@ -127,8 +127,8 @@ const MyPapers = () => {
               } else {
                 setError('You do not have access to this paper');
               }
-            } else {
-              setError('Paper not found');
+          } else {
+            setError('Paper not found');
             }
           } catch (err) {
             console.error('Error fetching selected paper:', err);
