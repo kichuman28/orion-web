@@ -2,7 +2,7 @@ import { ArrowRightIcon } from '../assets/icons';
 
 const CTA = () => {
   return (
-    <section className="py-24 relative overflow-hidden">
+    <section id="contact" className="py-28 relative overflow-hidden">
       {/* Enhanced animated background */}
       <div className="absolute inset-0 -z-10">
         <div className="absolute top-0 left-0 w-full h-full bg-gradient-to-br from-orion-lightBg via-white to-orion-lightGray/30"></div>

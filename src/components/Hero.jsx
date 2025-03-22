@@ -23,7 +23,6 @@ const Hero = () => {
               <span className="font-bold font-quicksand text-orion-darkGray text-8xl md:text-9xl lg:text-[10rem] leading-none inline-block">
                 <span className="relative z-10 drop-shadow-lg bg-gradient-to-b from-orion-darkGray via-orion-mediumGray to-orion-gray bg-clip-text text-transparent">ORION</span>
               </span>
-              <div className="absolute top-1/2 left-0 h-px w-full bg-gradient-to-r from-transparent via-orion-gray/30 to-transparent"></div>
               <div className="absolute -top-4 left-1/2 transform -translate-x-1/2 w-32 h-32 bg-orion-lightGray/20 rounded-full filter blur-2xl"></div>
             </div>
           </div>
@@ -36,20 +35,20 @@ const Hero = () => {
             A decentralized platform leveraging AI and blockchain to ensure the authenticity of scholarly work.
           </p>
           
-          <div className="flex flex-row gap-5 justify-center">
+          <div className="flex flex-row gap-6 justify-center">
             <button 
-              className="bg-orion-darkGray text-white py-3 px-6 rounded-lg text-base font-medium hover:bg-orion-mediumGray transition-colors duration-300 flex items-center gap-2"
+              className="bg-orion-darkGray text-white py-4 px-8 rounded-lg text-lg font-medium hover:bg-orion-mediumGray transition-colors duration-300 flex items-center gap-3"
               tabIndex="0"
               aria-label="Explore the Orion platform"
             >
               Explore Orion
-              <ArrowRightIcon className="w-5 h-5 transition-transform group-hover:translate-x-1" />
+              <ArrowRightIcon className="w-6 h-6 transition-transform group-hover:translate-x-1" />
             </button>
             
             <button 
-              className="bg-white text-orion-darkGray py-3 px-6 rounded-lg text-base font-medium 
+              className="bg-white text-orion-darkGray py-4 px-8 rounded-lg text-lg font-medium 
               border border-orion-gray/20 hover:bg-orion-lightBg/50 transition-colors duration-300
-              flex items-center gap-2"
+              flex items-center gap-3"
               tabIndex="0"
               aria-label="Learn more about Orion"
             >
