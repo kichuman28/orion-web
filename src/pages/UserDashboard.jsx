@@ -8,7 +8,7 @@ import PaperCard from '../components/PaperCard';
 import { Link } from 'react-router-dom';
 
 const UserDashboard = () => {
-  const { currentUser } = useAuth();
+  const { currentUser, walletAddress } = useAuth();
   
   // Mock data - in a real app, this would come from Firestore/API
   const [stats, setStats] = useState({
@@ -156,22 +156,6 @@ const UserDashboard = () => {
   
   return (
     <DashboardLayout>
-      {/* Header Wallet Connect Link */}
-      <div className="mb-6 flex justify-end">
-        <Link
-          to="/wallet-connection"
-          className="px-4 py-2 bg-gradient-to-r from-orion-darkGray to-orion-mediumGray text-white rounded-md shadow-sm text-sm font-medium hover:from-orion-darkGray hover:to-orion-darkGray focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-orion-darkGray transition-all flex items-center"
-          tabIndex="0"
-          aria-label="Connect wallet with MetaMask"
-        >
-          <svg className="mr-2 h-4 w-4" width="25" height="25" viewBox="0 0 25 25" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <path d="M21.875 10.9375H3.125C1.39911 10.9375 0 12.3366 0 14.0625V20.3125C0 22.0384 1.39911 23.4375 3.125 23.4375H21.875C23.6009 23.4375 25 22.0384 25 20.3125V14.0625C25 12.3366 23.6009 10.9375 21.875 10.9375Z" fill="white"/>
-            <path d="M21.875 1.5625H3.125C1.39911 1.5625 0 2.96161 0 4.6875V6.25C0 7.97589 1.39911 9.375 3.125 9.375H21.875C23.6009 9.375 25 7.97589 25 6.25V4.6875C25 2.96161 23.6009 1.5625 21.875 1.5625Z" fill="white"/>
-          </svg>
-          Connect Wallet
-        </Link>
-      </div>
-      
       {/* Welcome Section */}
       <div className="mb-8">
         <h1 className="text-2xl font-bold text-orion-darkGray mb-2">
@@ -194,6 +178,7 @@ const UserDashboard = () => {
           }
           trend="up"
           trendValue="20%"
+          bgColor="bg-purple-50"
         />
         
         <StatCard
@@ -201,9 +186,10 @@ const UserDashboard = () => {
           value={stats.papersVerified}
           icon={
             <svg className="w-6 h-6 text-orion-darkGray" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
           }
+          bgColor="bg-green-50"
         />
         
         <StatCard
@@ -214,6 +200,7 @@ const UserDashboard = () => {
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
           }
+          bgColor="bg-yellow-50"
         />
         
         <StatCard
@@ -224,220 +211,93 @@ const UserDashboard = () => {
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
           }
-          trend="up"
-          trendValue="15%"
+          bgColor="bg-blue-50"
         />
       </div>
       
-      {/* Main content - 2 column layout */}
+      {/* Wallet Status */}
+      {!walletAddress && (
+        <div className="bg-yellow-50 border border-yellow-200 text-yellow-800 px-4 py-3 rounded mb-8" role="alert">
+          <div className="flex">
+            <div className="flex-shrink-0">
+              <svg className="h-5 w-5 text-yellow-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+                <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+              </svg>
+            </div>
+            <div className="ml-3">
+              <p className="text-sm font-medium">
+                Please connect your wallet using the button in the header to fully utilize the platform's features.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+      
+      {/* Main Grid Layout */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        {/* Left column - 2/3 width */}
-        <div className="lg:col-span-2 space-y-8">
-          {/* Paper Submissions */}
-          <div className="bg-white rounded-xl shadow-md p-6">
-            <div className="flex justify-between items-center mb-6">
-              <h2 className="text-xl font-bold text-orion-darkGray">Your Papers</h2>
-              
-              <div className="flex gap-2">
-                <Link
-                  to="/my-papers"
-                  className="text-sm font-medium text-orion-darkGray hover:text-orion-mediumGray transition-colors"
-                  tabIndex="0"
-                  aria-label="View all papers"
-                >
-                  View All
-                </Link>
-                <span className="text-gray-300">|</span>
-                <Link
-                  to="/submit-paper"
-                  className="text-sm font-medium text-orion-darkGray hover:text-orion-mediumGray transition-colors"
-                  tabIndex="0"
-                  aria-label="Submit new paper"
-                >
-                  Submit New
-                </Link>
-              </div>
+        {/* Recent Papers */}
+        <div className="lg:col-span-2">
+          <div className="bg-white shadow rounded-lg overflow-hidden mb-8">
+            <div className="px-6 py-4 border-b border-gray-200 flex justify-between items-center">
+              <h2 className="text-lg font-medium text-gray-900">Recent Paper Submissions</h2>
+              <Link to="/papers" className="text-orion-primary hover:text-orion-primaryDark text-sm font-medium">
+                View All
+              </Link>
             </div>
-            
-            <div className="grid grid-cols-1 gap-6">
-              {papers.length > 0 ? (
-                papers.slice(0, 2).map((paper) => (
-                  <PaperCard key={paper.id} paper={paper} />
-                ))
-              ) : (
-                <div className="text-center py-10">
-                  <p className="text-gray-500 mb-4">You haven't submitted any papers yet.</p>
-                  <Link
-                    to="/submit-paper"
-                    className="inline-flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-orion-darkGray hover:bg-orion-mediumGray focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-orion-darkGray"
-                    tabIndex="0"
-                    aria-label="Submit your first paper"
-                  >
-                    Submit Your First Paper
-                  </Link>
-                </div>
-              )}
+            <div className="divide-y divide-gray-200">
+              {papers.map((paper) => (
+                <PaperCard key={paper.id} paper={paper} />
+              ))}
             </div>
           </div>
           
-          {/* Progress Charts */}
-          <div className="bg-white rounded-xl shadow-md p-6">
-            <h2 className="text-xl font-bold text-orion-darkGray mb-6">Your Progress</h2>
-            
-            <div className="grid grid-cols-1 gap-6">
-              {/* Simple bar chart visualization */}
-              <div>
-                <h3 className="text-sm font-medium text-gray-500 mb-3">Paper Submissions Over Time</h3>
-                <div className="h-48 flex items-end justify-between">
-                  {chartData.papers.map((value, index) => (
-                    <div key={index} className="flex flex-col items-center">
-                      <div 
-                        className="w-10 bg-gradient-to-t from-orion-darkGray to-orion-mediumGray rounded-t"
-                        style={{ height: `${value * 30}px` }}
-                      ></div>
-                      <div className="text-xs text-gray-500 mt-2">{chartData.months[index]}</div>
-                    </div>
-                  ))}
-                </div>
-              </div>
+          <div className="bg-white shadow rounded-lg overflow-hidden">
+            <div className="px-6 py-4 border-b border-gray-200 flex justify-between items-center">
+              <h2 className="text-lg font-medium text-gray-900">Educational Resources</h2>
+              <Link to="/resources" className="text-orion-primary hover:text-orion-primaryDark text-sm font-medium">
+                Browse All
+              </Link>
             </div>
-          </div>
-          
-          {/* Quick Access Shortcuts */}
-          <div className="bg-white rounded-xl shadow-md p-6">
-            <h2 className="text-xl font-bold text-orion-darkGray mb-6">Quick Actions</h2>
-            
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-              <Link
-                to="/submit-paper"
-                className="flex flex-col items-center justify-center p-4 border border-gray-200 rounded-xl hover:bg-gray-50 transition-colors"
-                tabIndex="0"
-                aria-label="Submit a new paper"
-              >
-                <div className="w-12 h-12 rounded-full bg-gray-100 flex items-center justify-center mb-2">
-                  <svg className="w-6 h-6 text-orion-darkGray" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                  </svg>
-                </div>
-                <span className="text-sm font-medium text-orion-darkGray">Submit Paper</span>
-              </Link>
-              
-              <Link
-                to="/learning"
-                className="flex flex-col items-center justify-center p-4 border border-gray-200 rounded-xl hover:bg-gray-50 transition-colors"
-                tabIndex="0"
-                aria-label="Browse lessons"
-              >
-                <div className="w-12 h-12 rounded-full bg-gray-100 flex items-center justify-center mb-2">
-                  <svg className="w-6 h-6 text-orion-darkGray" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
-                  </svg>
-                </div>
-                <span className="text-sm font-medium text-orion-darkGray">Browse Lessons</span>
-              </Link>
-              
-              <Link
-                to="/profile"
-                className="flex flex-col items-center justify-center p-4 border border-gray-200 rounded-xl hover:bg-gray-50 transition-colors"
-                tabIndex="0"
-                aria-label="Edit your profile"
-              >
-                <div className="w-12 h-12 rounded-full bg-gray-100 flex items-center justify-center mb-2">
-                  <svg className="w-6 h-6 text-orion-darkGray" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-                  </svg>
-                </div>
-                <span className="text-sm font-medium text-orion-darkGray">Edit Profile</span>
-              </Link>
-              
-              <Link
-                to="/my-certificates"
-                className="flex flex-col items-center justify-center p-4 border border-gray-200 rounded-xl hover:bg-gray-50 transition-colors"
-                tabIndex="0"
-                aria-label="View your certificates"
-              >
-                <div className="w-12 h-12 rounded-full bg-gray-100 flex items-center justify-center mb-2">
-                  <svg className="w-6 h-6 text-orion-darkGray" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
-                  </svg>
-                </div>
-                <span className="text-sm font-medium text-orion-darkGray">Certificates</span>
-              </Link>
+            <div className="p-6 grid grid-cols-1 md:grid-cols-2 gap-6">
+              {lessons.map((lesson) => (
+                <LessonCard key={lesson.id} lesson={lesson} />
+              ))}
             </div>
           </div>
         </div>
         
-        {/* Right column - 1/3 width */}
-        <div className="space-y-8">
-          {/* Notifications */}
-          <div className="bg-white rounded-xl shadow-md overflow-hidden">
-            <div className="p-6 border-b border-gray-200">
-              <div className="flex justify-between items-center">
-                <h2 className="text-xl font-bold text-orion-darkGray">Notifications</h2>
-                <span className="bg-blue-600 text-white text-xs font-medium px-2.5 py-0.5 rounded-full">
-                  {notifications.filter(n => !n.read).length} New
-                </span>
-              </div>
+        {/* Sidebar - Notifications & Quick Actions */}
+        <div className="lg:col-span-1 space-y-8">
+          {/* Quick Actions */}
+          <div className="bg-white shadow rounded-lg overflow-hidden">
+            <div className="px-6 py-4 border-b border-gray-200">
+              <h2 className="text-lg font-medium text-gray-900">Quick Actions</h2>
             </div>
-            
-            <div className="max-h-96 overflow-y-auto">
-              {notifications.length > 0 ? (
-                notifications.map((notification) => (
-                  <NotificationItem key={notification.id} notification={notification} />
-                ))
-              ) : (
-                <div className="text-center py-8">
-                  <p className="text-gray-500">No notifications yet</p>
-                </div>
-              )}
-            </div>
-            
-            <div className="p-4 border-t border-gray-200">
-              <Link
-                to="/notifications"
-                className="text-sm font-medium text-orion-darkGray flex justify-center hover:underline"
-                tabIndex="0"
-                aria-label="View all notifications"
-              >
-                View All Notifications
+            <div className="p-6 space-y-4">
+              <Link to="/submit-paper" className="block w-full px-4 py-3 bg-orion-primary text-white text-center font-medium rounded-md hover:bg-orion-primaryDark">
+                Submit New Paper
+              </Link>
+              <Link to="/tokens" className="block w-full px-4 py-3 bg-white border border-gray-300 text-orion-darkGray text-center font-medium rounded-md hover:bg-gray-50">
+                View Tokens & Rewards
+              </Link>
+              <Link to="/community" className="block w-full px-4 py-3 bg-white border border-gray-300 text-orion-darkGray text-center font-medium rounded-md hover:bg-gray-50">
+                Join Research Community
               </Link>
             </div>
           </div>
           
-          {/* Timeline / Activity Feed */}
-          <div className="bg-white rounded-xl shadow-md p-6">
-            <h2 className="text-xl font-bold text-orion-darkGray mb-6">Activity Timeline</h2>
-            
-            <div className="flow-root">
-              <ul className="-mb-8">
-                {timelineItems.map((item, index) => (
-                  <li key={item.id}>
-                    <div className="relative pb-8">
-                      {index !== timelineItems.length - 1 ? (
-                        <span className="absolute top-5 left-5 -ml-px h-full w-0.5 bg-gray-200" aria-hidden="true"></span>
-                      ) : null}
-                      <div className="relative flex items-start space-x-3">
-                        <div className="relative">
-                          <div className="h-10 w-10 rounded-full bg-gray-100 flex items-center justify-center ring-8 ring-white">
-                            {item.icon}
-                          </div>
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <div>
-                            <div className="text-sm font-medium text-orion-darkGray">{item.title}</div>
-                            <p className="mt-0.5 text-sm text-gray-500">
-                              {new Date(item.date).toLocaleDateString()}
-                            </p>
-                          </div>
-                          <div className="mt-2 text-sm text-gray-700">
-                            <p>{item.description}</p>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  </li>
-                ))}
-              </ul>
+          {/* Notifications */}
+          <div className="bg-white shadow rounded-lg overflow-hidden">
+            <div className="px-6 py-4 border-b border-gray-200 flex justify-between items-center">
+              <h2 className="text-lg font-medium text-gray-900">Notifications</h2>
+              <Link to="/notifications" className="text-orion-primary hover:text-orion-primaryDark text-sm font-medium">
+                View All
+              </Link>
+            </div>
+            <div>
+              {notifications.map((notification) => (
+                <NotificationItem key={notification.id} notification={notification} />
+              ))}
             </div>
           </div>
         </div>

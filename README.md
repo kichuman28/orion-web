@@ -1,12 +1,119 @@
-# React + Vite
+# Orion - Blockchain-Powered Academic Review Platform
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+Orion is a decentralized platform for academic paper submissions and peer review, leveraging blockchain technology for transparency and incentivization.
 
-Currently, two official plugins are available:
+## Features
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react/README.md) uses [Babel](https://babeljs.io/) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+- 🔐 Secure authentication with role-based access control
+- 📄 Academic paper submission and review system
+- ⛓️ Blockchain integration for paper verification and staking
+- 🌐 IPFS storage for decentralized and persistent paper storage
+- 👥 Role-based dashboards for users, committee members, and admins
+- 💰 MetaMask wallet integration for blockchain interactions and staking
 
-## Expanding the ESLint configuration
+## Technology Stack
 
-If you are developing a production application, we recommend using TypeScript and enable type-aware lint rules. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+- **Frontend**: React with Vite
+- **Styling**: TailwindCSS
+- **Authentication/Database**: Firebase (Auth + Firestore)
+- **File Storage**: IPFS via Pinata
+- **Blockchain**: Ethereum compatible (Open Campus EDU Chain)
+- **Wallet Connection**: ethers.js with MetaMask
+
+## Getting Started
+
+### Prerequisites
+
+- Node.js (v16+)
+- npm or yarn
+- Firebase account
+- Pinata account for IPFS storage
+- Ethereum wallet (like MetaMask)
+
+### Installation
+
+1. Clone the repository
+   ```
+   git clone https://github.com/yourusername/orion.git
+   cd orion
+   ```
+
+2. Install dependencies
+   ```
+   npm install
+   ```
+
+3. Set up environment variables
+   - Copy `.env.example` to `.env`
+   - Fill in your Firebase credentials
+   - Add your Pinata API keys
+   - Add blockchain configuration
+
+4. Start the development server
+   ```
+   npm run dev
+   ```
+
+## IPFS Integration
+
+The platform uses IPFS (InterPlanetary File System) via Pinata for decentralized storage of academic papers. This approach offers several advantages:
+
+- **Permanence**: Files on IPFS cannot be deleted or modified once uploaded
+- **Content addressing**: Files are referenced by their content, not location
+- **Censorship resistance**: No central authority can remove content
+- **Improved availability**: Content can be fetched from multiple nodes
+
+### How it works
+
+1. When a user uploads a paper (PDF file), it's sent to IPFS via Pinata's API
+2. Pinata pins the file (keeps it permanently available) and returns an IPFS hash (CID)
+3. The CID is stored in Firestore along with paper metadata
+4. When someone wants to view the paper, it's fetched from the IPFS network
+
+### Configuration
+
+To use the IPFS integration, you need:
+
+1. A Pinata account (sign up at [pinata.cloud](https://pinata.cloud))
+2. API Keys from your Pinata dashboard
+3. These keys added to your `.env` file:
+
+```
+VITE_PINATA_API_KEY=your_pinata_api_key
+VITE_PINATA_SECRET_KEY=your_pinata_secret_key
+VITE_IPFS_GATEWAY=https://gateway.pinata.cloud/ipfs/
+```
+
+## Wallet Integration
+
+The platform integrates with Ethereum wallets (primarily MetaMask) to enable blockchain interactions such as staking tokens when submitting papers.
+
+### Features
+
+- **Universal wallet connection**: Connect your wallet from any page via the header button
+- **Persistent connection**: Wallet connection state is preserved across the application
+- **Chain switching**: Automatically prompts users to switch to the EDU Chain network
+- **Paper submission gating**: Users must connect a wallet to submit papers
+- **Transaction support**: Real stake transactions when submitting papers
+
+### How to Use
+
+1. Click the "Connect Wallet" button in the header
+2. Approve the connection request in your MetaMask wallet
+3. If prompted, approve switching to the EDU Chain network
+4. Your wallet address will now appear in the header, and you can submit papers
+
+### Configuration
+
+Configure the blockchain connection in your `.env` file:
+
+```
+VITE_CHAIN_ID=0xA045C
+VITE_CHAIN_NAME=EDU Chain Testnet
+VITE_RPC_URL=https://open-campus-codex-sepolia.drpc.org
+VITE_BLOCK_EXPLORER=https://opencampus-codex.blockscout.com
+```
+
+## License
+
+This project is licensed under the MIT License - see the LICENSE file for details.

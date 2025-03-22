@@ -4,7 +4,7 @@ import { useAuth } from '../contexts/AuthContext';
 import OrionLogo from '../assets/OrionLogo';
 
 const Sidebar = () => {
-  const { currentUser, userRole } = useAuth();
+  const { currentUser, userRole, walletAddress, isWalletConnected } = useAuth();
   const location = useLocation();
   const [isExpanded, setIsExpanded] = useState(true);
   const [navItems, setNavItems] = useState([]);
@@ -248,38 +248,54 @@ const Sidebar = () => {
                     isActive
                       ? 'bg-orion-lightBg text-orion-darkGray'
                       : 'text-gray-600 hover:bg-gray-100 hover:text-orion-darkGray'
-                  } transition-colors duration-200`}
+                  }`}
                   tabIndex="0"
                   aria-label={item.name}
                 >
-                  <span className="inline-block">{item.icon}</span>
-                  {isExpanded && (
-                    <span className="ml-3 truncate">{item.name}</span>
-                  )}
+                  <span className="shrink-0">{item.icon}</span>
+                  {isExpanded && <span className="ml-3">{item.name}</span>}
                 </Link>
               </li>
             );
           })}
         </ul>
       </nav>
-
+      
+      {/* Wallet Status Indicator in Sidebar */}
+      {isExpanded && !isWalletConnected() && (
+        <div className="p-4 border-t border-gray-200">
+          <div className="bg-yellow-50 border border-yellow-200 rounded-md p-3">
+            <div className="flex">
+              <div className="flex-shrink-0">
+                <svg className="h-5 w-5 text-yellow-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+                  <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                </svg>
+              </div>
+              <div className="ml-3">
+                <p className="text-xs text-yellow-800 font-medium">
+                  Connect your wallet in the header to submit papers and stake tokens.
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+      
       {/* User Info */}
-      <div className="border-t border-gray-200 p-4">
+      <div className="p-4 border-t border-gray-200">
         <div className="flex items-center">
-          <div className="h-8 w-8 rounded-full bg-orion-lightBg flex items-center justify-center">
-            <span className="text-sm font-medium text-orion-darkGray">
-              {currentUser?.email?.charAt(0).toUpperCase() || '?'}
-            </span>
+          <div className="flex-shrink-0">
+            <div className="w-8 h-8 rounded-full bg-orion-lightBg flex items-center justify-center text-orion-darkGray font-semibold">
+              {currentUser?.email?.charAt(0).toUpperCase() || 'U'}
+            </div>
           </div>
           {isExpanded && (
-            <div className="ml-3 min-w-0 flex-1">
+            <div className="ml-3">
               <p className="text-sm font-medium text-orion-darkGray truncate">
-                {currentUser?.email}
+                {currentUser?.email || 'User'}
               </p>
-              <p className="text-xs text-orion-gray truncate">
-                <span className="px-1.5 py-0.5 bg-blue-100 text-blue-800 text-xs font-medium rounded-full">
-                  {userRole === 'admin' ? 'Admin' : userRole === 'committee' ? 'Committee' : 'User'}
-                </span>
+              <p className="text-xs text-gray-500 capitalize">
+                {userRole}
               </p>
             </div>
           )}

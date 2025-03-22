@@ -2,6 +2,9 @@ import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import DashboardLayout from '../components/DashboardLayout';
+import { getIPFSGatewayURL } from '../config/ipfs';
+import { db } from '../config/firebase';
+import { collection, query, where, getDocs, doc, getDoc, orderBy } from 'firebase/firestore';
 
 const MyPapers = () => {
   const { currentUser } = useAuth();
@@ -30,81 +33,106 @@ const MyPapers = () => {
   // Load papers on component mount
   useEffect(() => {
     const fetchPapers = async () => {
+      if (!currentUser) {
+        setError('You need to be logged in to view your papers');
+        setIsLoading(false);
+        return;
+      }
+
       try {
         setIsLoading(true);
         setError('');
         
-        // Mock data - in a real app, this would come from Firestore/API/Blockchain
-        const mockPapers = [
-          {
-            id: 1,
-            title: 'Blockchain in Education',
-            abstract: 'This paper explores the potential applications of blockchain technology in educational systems, focusing on credential verification and academic record security.',
-            status: 'approved',
-            submittedAt: new Date(Date.now() - 1000 * 60 * 60 * 24 * 5).toISOString(), // 5 days ago
-            authors: ['John Doe', 'Jane Smith'],
-            category: 'Blockchain',
-            blockchain: true,
-            ipfsCid: 'QmYourIPFSCidForPaper1',
-            accessFee: 5, // In tokens or ETH
-            hasAccess: true, // This user owns the paper or has paid
-            publisher: 'Orion Academy',
-            publicationDate: new Date(Date.now() - 1000 * 60 * 60 * 24 * 3).toISOString(), // 3 days ago
-            doi: '10.1234/orion.2023.0001',
-            keywords: ['blockchain', 'education', 'credentials', 'security'],
-            citations: 3,
-            downloads: 45
-          },
-          {
-            id: 2,
-            title: 'Machine Learning Applications',
-            abstract: 'An exploration of modern machine learning applications in various fields and industries, with case studies and practical implementations.',
-            status: 'verified',
-            submittedAt: new Date(Date.now() - 1000 * 60 * 60 * 24 * 10).toISOString(), // 10 days ago
-            authors: ['John Doe'],
-            category: 'Machine Learning',
-            blockchain: true,
-            ipfsCid: 'QmYourIPFSCidForPaper2',
-            accessFee: 3, // In tokens or ETH
-            hasAccess: false, // User needs to pay
-            publisher: 'Orion Academy',
-            publicationDate: new Date(Date.now() - 1000 * 60 * 60 * 24 * 7).toISOString(), // 7 days ago
-            doi: '10.1234/orion.2023.0002',
-            keywords: ['machine learning', 'AI', 'case studies', 'industry applications'],
-            citations: 1,
-            downloads: 27
-          },
-          {
-            id: 3,
-            title: 'Smart Contracts',
-            abstract: 'A comprehensive look at smart contracts, their implementation, use cases, and potential for disrupting traditional contractual relationships.',
-            status: 'rejected',
-            submittedAt: new Date(Date.now() - 1000 * 60 * 60 * 24 * 20).toISOString(), // 20 days ago
-            authors: ['John Doe', 'Robert Johnson', 'Sarah Williams'],
-            category: 'Blockchain',
-            blockchain: false,
-            ipfsCid: '',
-            accessFee: 0,
-            hasAccess: true,
-            publisher: '',
-            publicationDate: null,
-            doi: '',
-            keywords: ['smart contracts', 'blockchain', 'legal tech'],
-            citations: 0,
-            downloads: 0
-          },
-        ];
+        // Create a Firestore query to get papers by the current user
+        const papersRef = collection(db, 'papers');
+        const q = query(
+          papersRef, 
+          where('authorUid', '==', currentUser.uid),
+          orderBy('submissionDate', 'desc')
+        );
         
-        setPapers(mockPapers);
+        // Execute the query
+        const querySnapshot = await getDocs(q);
         
-        // If paperId is provided, set the selected paper
+        // Process the results
+        const fetchedPapers = [];
+        querySnapshot.forEach((doc) => {
+          const paperData = doc.data();
+          fetchedPapers.push({
+            id: doc.id,
+            title: paperData.title || 'Untitled Paper',
+            abstract: paperData.abstract || 'No abstract provided',
+            status: paperData.status || 'pending',
+            submittedAt: paperData.submissionDate?.toDate().toISOString() || new Date().toISOString(),
+            authors: paperData.teamMembers ? [paperData.authorName, ...paperData.teamMembers.split(',').map(author => author.trim())] : [paperData.authorName || 'Anonymous Researcher'],
+            category: paperData.researchField || 'Uncategorized',
+            blockchain: Boolean(paperData.blockchainVerified),
+            ipfsHash: paperData.ipfsHash || '',
+            fileUrl: paperData.fileUrl || '',
+            accessFee: paperData.accessFee || 0,
+            hasAccess: true, // The user submitted this paper, so they have access
+            publisher: paperData.publisher || 'Orion Platform',
+            publicationDate: paperData.publicationDate?.toDate().toISOString() || null,
+            doi: paperData.doi || '',
+            keywords: paperData.keywords || [],
+            citations: paperData.citations || 0,
+            downloads: paperData.downloads || 0,
+            fileName: paperData.fileName || '',
+            fileSize: paperData.fileSize || 0,
+            votes: paperData.votes || { approve: 0, reject: 0, totalVotes: 0 },
+            comments: paperData.comments || []
+          });
+        });
+        
+        setPapers(fetchedPapers);
+        
+        // If paperId is provided, fetch the selected paper directly from Firestore
         if (paperId) {
-          const paper = mockPapers.find(p => p.id === parseInt(paperId));
-          if (paper) {
-            setSelectedPaper(paper);
-            setHasAccess(paper.hasAccess);
-          } else {
-            setError('Paper not found');
+          try {
+            const paperRef = doc(db, 'papers', paperId);
+            const paperSnap = await getDoc(paperRef);
+            
+            if (paperSnap.exists()) {
+              const paperData = paperSnap.data();
+              
+              // Only set as selected if it belongs to the current user
+              if (paperData.authorUid === currentUser.uid) {
+                const selectedPaperData = {
+                  id: paperSnap.id,
+                  title: paperData.title || 'Untitled Paper',
+                  abstract: paperData.abstract || 'No abstract provided',
+                  status: paperData.status || 'pending',
+                  submittedAt: paperData.submissionDate?.toDate().toISOString() || new Date().toISOString(),
+                  authors: paperData.teamMembers ? [paperData.authorName, ...paperData.teamMembers.split(',').map(author => author.trim())] : [paperData.authorName || 'Anonymous Researcher'],
+                  category: paperData.researchField || 'Uncategorized',
+                  blockchain: Boolean(paperData.blockchainVerified),
+                  ipfsHash: paperData.ipfsHash || '',
+                  fileUrl: paperData.fileUrl || '',
+                  accessFee: paperData.accessFee || 0,
+                  hasAccess: true, // The user submitted this paper, so they have access
+                  publisher: paperData.publisher || 'Orion Platform',
+                  publicationDate: paperData.publicationDate?.toDate().toISOString() || null,
+                  doi: paperData.doi || '',
+                  keywords: paperData.keywords || [],
+                  citations: paperData.citations || 0,
+                  downloads: paperData.downloads || 0,
+                  fileName: paperData.fileName || '',
+                  fileSize: paperData.fileSize || 0,
+                  votes: paperData.votes || { approve: 0, reject: 0, totalVotes: 0 },
+                  comments: paperData.comments || []
+                };
+                
+                setSelectedPaper(selectedPaperData);
+                setHasAccess(true);
+              } else {
+                setError('You do not have access to this paper');
+              }
+            } else {
+              setError('Paper not found');
+            }
+          } catch (err) {
+            console.error('Error fetching selected paper:', err);
+            setError('Failed to load paper details');
           }
         }
         
@@ -117,12 +145,20 @@ const MyPapers = () => {
     };
     
     fetchPapers();
-  }, [paperId]);
+  }, [paperId, currentUser]);
   
   // Handle payment for paper access
   const handlePayForAccess = async () => {
     try {
       setIsPaymentProcessing(true);
+      
+      // Check if user's wallet is connected first
+      const { walletAddress, isWalletConnected } = useAuth();
+      if (!isWalletConnected()) {
+        setError('Please connect your wallet first to access this paper');
+        setIsPaymentProcessing(false);
+        return;
+      }
       
       // Mock payment process - would actually involve blockchain transaction
       await new Promise(resolve => setTimeout(resolve, 2000));
@@ -147,816 +183,570 @@ const MyPapers = () => {
     }
   };
   
-  // Handle AI Q&A
+  // Handle asking a question to AI about the paper
   const handleAskQuestion = async () => {
     if (!question.trim()) return;
     
     try {
+      // Add user question to the chat
+      const userQuestion = { sender: 'user', text: question, timestamp: new Date().toISOString() };
+      setAnswers(prev => [...prev, userQuestion]);
+      setQuestion('');
       setIsAiLoading(true);
       
-      // Add user question to the answers array
-      setAnswers(prev => [...prev, { 
-        type: 'question', 
-        content: question,
+      // In a real app, this would be an API call to your AI service
+      // For now, we'll simulate a response after a delay
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      
+      // Simulated AI response
+      const aiResponse = { 
+        sender: 'ai', 
+        text: `This is a simulated response to: "${userQuestion.text}". In the actual implementation, this would be a real response from your AI service based on the paper's content.`, 
         timestamp: new Date().toISOString()
-      }]);
+      };
       
-      // Store the question before clearing input
-      const currentQuestion = question;
-      
-      // Clear the question input immediately for better UX
-      setQuestion('');
-      
-      // Add typing indicator
-      setAnswers(prev => [...prev, { 
-        type: 'typing', 
-        content: '',
-        timestamp: new Date().toISOString()
-      }]);
-      
-      // Mock AI response - would actually call your RAG API
-      await new Promise(resolve => setTimeout(resolve, 1500));
-      
-      // Remove typing indicator and add AI response
-      setAnswers(prev => {
-        const withoutTyping = prev.filter(a => a.type !== 'typing');
-        return [...withoutTyping, { 
-          type: 'answer', 
-          content: `This is a simulated AI response to your question: "${currentQuestion}". In a real implementation, this would use a RAG system to provide an answer based on the paper's content, including citations and references to specific sections.`,
-          timestamp: new Date().toISOString()
-        }];
-      });
+      setAnswers(prev => [...prev, aiResponse]);
       
     } catch (err) {
       console.error('AI Q&A error:', err);
-      setError('Failed to get an answer. Please try again.');
-      // Remove typing indicator if there was an error
-      setAnswers(prev => prev.filter(a => a.type !== 'typing'));
+      // Add error message to the chat
+      const errorMessage = { 
+        sender: 'system', 
+        text: 'Sorry, there was an error processing your question. Please try again.', 
+        timestamp: new Date().toISOString() 
+      };
+      setAnswers(prev => [...prev, errorMessage]);
     } finally {
       setIsAiLoading(false);
     }
   };
   
-  // Handle paper selection
+  // Handle selecting a paper to view details
   const handleSelectPaper = (paper) => {
     setSelectedPaper(paper);
-    setHasAccess(paper.hasAccess);
-    setAnswers([]);
-    navigate(`/papers/${paper.id}`);
+    navigate(`/dashboard/my-papers/${paper.id}`);
   };
   
-  // Handle back to list
+  // Handle going back to paper list
   const handleBackToList = () => {
     setSelectedPaper(null);
     setAnswers([]);
-    navigate('/papers');
+    navigate('/dashboard/my-papers');
   };
   
-  // Add this near the other useEffect hooks
+  // Auto-scroll to bottom of chat when new messages arrive
+  const chatContainerRef = useRef(null);
   useEffect(() => {
-    // Scroll to the bottom of the chat container when new messages arrive
-    if (answers.length > 0) {
-      const chatContainer = document.getElementById('chat-container');
-      if (chatContainer) {
-        chatContainer.scrollTop = chatContainer.scrollHeight;
-      }
+    if (chatContainerRef.current) {
+      chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
     }
   }, [answers]);
   
-  // Handle PDF zoom in/out
+  // Handle PDF zoom
   const handleZoomIn = () => {
-    setPdfScale(prev => Math.min(prev + 0.2, 2.5));
+    setPdfScale(prev => Math.min(prev + 0.25, 3));
   };
 
   const handleZoomOut = () => {
-    setPdfScale(prev => Math.max(prev - 0.2, 0.5));
+    setPdfScale(prev => Math.max(prev - 0.25, 0.5));
   };
 
   const handleResetZoom = () => {
     setPdfScale(1);
   };
   
+  // Handle viewing paper in full screen
+  const handleViewPaper = async () => {
+    try {
+      if (!selectedPaper?.ipfsHash) {
+      setError('Paper file not found');
+      return;
+    }
+    
+      // Generate a gateway URL for the IPFS hash
+      const gatewayUrl = getIPFSGatewayURL(selectedPaper.ipfsHash);
+      
+      // Open the paper in a new tab
+      window.open(gatewayUrl, '_blank');
+      
+      // In a real app, you would also track this as a download/view
+      // Update download count in Firestore
+      // const paperRef = doc(db, 'papers', selectedPaper.id);
+      // await updateDoc(paperRef, {
+      //   downloads: increment(1)
+      // });
+      
+    } catch (err) {
+      console.error('Error viewing paper:', err);
+      setError('Failed to open paper. Please try again.');
+    }
+  };
+  
   return (
     <DashboardLayout>
-      <div className="max-w-7xl mx-auto">
-        {/* Header */}
-        <div className="mb-8">
-          <h1 className="text-2xl font-bold text-orion-darkGray mb-2">
+      <div className="p-6">
+        <header className="mb-8">
+          <h1 className="text-3xl font-bold text-gray-900">
             {selectedPaper ? 'Paper Details' : 'My Papers'}
           </h1>
-          <p className="text-gray-600">
-            {selectedPaper 
-              ? 'View paper details, access content, and interact with AI-powered Q&A'
-              : 'Browse your submitted, published, and verified academic papers'
-            }
-          </p>
-        </div>
-        
-        {/* Error display */}
         {error && (
-          <div className="mb-6 p-4 bg-red-50 border-l-4 border-red-500 text-red-700">
-            <p className="font-medium">Error</p>
-            <p>{error}</p>
+            <div className="mt-4 p-4 bg-red-50 border border-red-200 rounded-md">
+              <p className="text-red-700">{error}</p>
           </div>
         )}
+        </header>
         
-        {/* Loading state */}
         {isLoading ? (
           <div className="flex justify-center items-center h-64">
-            <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-orion-darkGray"></div>
+            <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-primary"></div>
           </div>
         ) : (
           <>
-            {/* Render content based on whether a paper is selected */}
-            {selectedPaper ? (
-              // Paper detail view with PDF viewer and AI Q&A
-              <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-                {/* Left column - Paper details and PDF viewer */}
-                <div className="lg:col-span-2 space-y-6">
-                  {/* Paper Details Card */}
-                  <div className="bg-white rounded-xl shadow-md p-6">
-                    <div className="flex items-center mb-6">
+            {!selectedPaper ? (
+              // Papers list view
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {papers.length === 0 ? (
+                  <div className="col-span-full text-center py-12">
+                    <h2 className="text-xl font-medium text-gray-500">You haven't submitted any papers yet</h2>
+                    <p className="mt-2 text-gray-500">
+                      Once you submit papers, they will appear here.
+                    </p>
                       <button
-                        onClick={handleBackToList}
-                        className="mr-4 p-2 rounded-full hover:bg-gray-100"
-                        tabIndex="0"
-                        aria-label="Back to papers list"
-                      >
-                        <svg className="w-5 h-5 text-orion-darkGray" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
-                        </svg>
+                      onClick={() => navigate('/dashboard/submit-paper')}
+                      className="mt-4 px-4 py-2 bg-primary text-white rounded-md hover:bg-primary-dark transition-colors"
+                    >
+                      Submit a Paper
                       </button>
-                      
-                      <div>
-                        <h2 className="text-xl font-bold text-orion-darkGray">{selectedPaper.title}</h2>
-                        <div className="flex flex-wrap gap-2 mt-1">
-                          {selectedPaper.status === 'approved' && (
-                            <span className="px-2 py-1 text-xs font-medium rounded-full bg-green-100 text-green-800">
-                              Approved
-                            </span>
-                          )}
-                          {selectedPaper.status === 'verified' && (
-                            <span className="px-2 py-1 text-xs font-medium rounded-full bg-blue-100 text-blue-800">
-                              Verified
-                            </span>
-                          )}
-                          {selectedPaper.status === 'rejected' && (
-                            <span className="px-2 py-1 text-xs font-medium rounded-full bg-red-100 text-red-800">
-                              Rejected
-                            </span>
-                          )}
-                          {selectedPaper.status === 'pending' && (
-                            <span className="px-2 py-1 text-xs font-medium rounded-full bg-yellow-100 text-yellow-800">
-                              Under Review
-                            </span>
-                          )}
-                          {selectedPaper.blockchain && (
-                            <span className="px-2 py-1 text-xs font-medium rounded-full bg-indigo-100 text-indigo-800">
-                              Blockchain Verified
-                            </span>
-                          )}
+                  </div>
+                ) : (
+                  papers.map(paper => (
+                    <div 
+                      key={paper.id} 
+                      className="border rounded-lg shadow-sm hover:shadow-md transition-shadow cursor-pointer overflow-hidden bg-white"
+                      onClick={() => handleSelectPaper(paper)}
+                    >
+                      <div className="p-6">
+                        <div className="flex justify-between items-start mb-3">
+                          <h2 className="text-xl font-semibold text-gray-900 line-clamp-2">{paper.title}</h2>
+                          <span className={`px-2 py-1 text-xs rounded-full font-medium ${
+                            paper.status === 'approved' ? 'bg-green-100 text-green-800' : 
+                            paper.status === 'pending' ? 'bg-yellow-100 text-yellow-800' : 
+                            paper.status === 'verified' ? 'bg-blue-100 text-blue-800' : 
+                            'bg-red-100 text-red-800'
+                          }`}>
+                            {paper.status.charAt(0).toUpperCase() + paper.status.slice(1)}
+                          </span>
                         </div>
-                      </div>
-                    </div>
-                    
-                    {/* Paper metadata */}
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-                      <div>
-                        <h3 className="text-sm font-medium text-gray-500 mb-1">Authors</h3>
-                        <p className="text-orion-darkGray">
-                          {selectedPaper.authors.join(', ')}
-                        </p>
-                      </div>
-                      <div>
-                        <h3 className="text-sm font-medium text-gray-500 mb-1">Category</h3>
-                        <p className="text-orion-darkGray">{selectedPaper.category}</p>
-                      </div>
-                      <div>
-                        <h3 className="text-sm font-medium text-gray-500 mb-1">Submitted On</h3>
-                        <p className="text-orion-darkGray">
-                          {new Date(selectedPaper.submittedAt).toLocaleDateString()}
-                        </p>
-                      </div>
-                      {selectedPaper.publicationDate && (
-                        <div>
-                          <h3 className="text-sm font-medium text-gray-500 mb-1">Published On</h3>
-                          <p className="text-orion-darkGray">
-                            {new Date(selectedPaper.publicationDate).toLocaleDateString()}
-                          </p>
-                        </div>
-                      )}
-                      {selectedPaper.publisher && (
-                        <div>
-                          <h3 className="text-sm font-medium text-gray-500 mb-1">Publisher</h3>
-                          <p className="text-orion-darkGray">{selectedPaper.publisher}</p>
-                        </div>
-                      )}
-                      {selectedPaper.doi && (
-                        <div>
-                          <h3 className="text-sm font-medium text-gray-500 mb-1">DOI</h3>
-                          <p className="text-orion-darkGray">{selectedPaper.doi}</p>
-                        </div>
-                      )}
-                    </div>
-                    
-                    {/* Keywords */}
-                    {selectedPaper.keywords && selectedPaper.keywords.length > 0 && (
-                      <div className="mb-6">
-                        <h3 className="text-sm font-medium text-gray-500 mb-2">Keywords</h3>
-                        <div className="flex flex-wrap gap-2">
-                          {selectedPaper.keywords.map((keyword, index) => (
-                            <span 
-                              key={index}
-                              className="px-3 py-1 text-xs rounded-full bg-gray-100 text-orion-darkGray"
-                            >
+                        
+                        <p className="text-gray-600 text-sm line-clamp-3 mb-4">{paper.abstract}</p>
+                        
+                        <div className="flex flex-wrap gap-2 mb-4">
+                          {paper.keywords && paper.keywords.slice(0, 3).map((keyword, index) => (
+                            <span key={index} className="px-2 py-1 bg-gray-100 text-gray-600 text-xs rounded-full">
                               {keyword}
                             </span>
                           ))}
                         </div>
+                        
+                        <div className="flex justify-between items-center text-sm text-gray-500">
+                          <span>
+                            {new Date(paper.submittedAt).toLocaleDateString()}
+                            </span>
+                          
+                          <div className="flex items-center space-x-3">
+                            {paper.blockchain && (
+                              <span className="flex items-center space-x-1">
+                                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-blue-500" viewBox="0 0 20 20" fill="currentColor">
+                                  <path fillRule="evenodd" d="M2.166 4.999A11.954 11.954 0 0010 1.944 11.954 11.954 0 0017.834 5c.11.65.166 1.32.166 2.001 0 5.225-3.34 9.67-8 11.317C5.34 16.67 2 12.225 2 7c0-.682.057-1.35.166-2.001zm11.541 3.708a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                                </svg>
+                                <span>Verified</span>
+                            </span>
+                          )}
+                            
+                            <span>{paper.authors?.length} Author{paper.authors?.length !== 1 ? 's' : ''}</span>
+                          </div>
+                        </div>
                       </div>
-                    )}
+                    </div>
+                  ))
+                )}
+              </div>
+            ) : (
+              // Paper details view
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                <div className="lg:col-span-2">
+                  <div className="bg-white rounded-lg shadow-sm p-6 mb-6">
+                    <div className="flex justify-between items-start mb-6">
+                      <button 
+                        onClick={handleBackToList}
+                        className="inline-flex items-center text-primary hover:text-primary-dark"
+                      >
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-1" viewBox="0 0 20 20" fill="currentColor">
+                          <path fillRule="evenodd" d="M12.707 5.293a1 1 0 010 1.414L9.414 10l3.293 3.293a1 1 0 01-1.414 1.414l-4-4a1 1 0 010-1.414l4-4a1 1 0 011.414 0z" clipRule="evenodd" />
+                        </svg>
+                        Back to My Papers
+                      </button>
+                      
+                      <span className={`px-3 py-1 text-sm rounded-full font-medium ${
+                        selectedPaper.status === 'approved' ? 'bg-green-100 text-green-800' : 
+                        selectedPaper.status === 'pending' ? 'bg-yellow-100 text-yellow-800' : 
+                        selectedPaper.status === 'verified' ? 'bg-blue-100 text-blue-800' : 
+                        'bg-red-100 text-red-800'
+                      }`}>
+                        {selectedPaper.status.charAt(0).toUpperCase() + selectedPaper.status.slice(1)}
+                            </span>
+                        </div>
                     
-                    {/* Abstract */}
-                    <div>
-                      <h3 className="text-sm font-medium text-gray-500 mb-2">Abstract</h3>
-                      <p className="text-orion-darkGray">{selectedPaper.abstract}</p>
+                    <h1 className="text-2xl font-bold text-gray-900 mb-4">{selectedPaper.title}</h1>
+                    
+                    <div className="flex flex-wrap gap-2 mb-6">
+                      {selectedPaper.keywords && selectedPaper.keywords.map((keyword, index) => (
+                        <span key={index} className="px-2 py-1 bg-gray-100 text-gray-600 text-xs rounded-full">
+                          {keyword}
+                        </span>
+                      ))}
+                      </div>
+                    
+                    <div className="mb-6">
+                      <h2 className="text-lg font-medium text-gray-900 mb-2">Abstract</h2>
+                      <p className="text-gray-700">{selectedPaper.abstract}</p>
+                    </div>
+                    
+                    <div className="border-t border-gray-200 pt-6">
+                      <h2 className="text-lg font-medium text-gray-900 mb-4">Paper Information</h2>
+                      
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div>
+                          <h3 className="text-sm font-medium text-gray-500">Authors</h3>
+                          <ul className="mt-1 text-gray-700">
+                            {selectedPaper.authors && selectedPaper.authors.map((author, index) => (
+                              <li key={index}>{author}</li>
+                            ))}
+                          </ul>
+                      </div>
+                        
+                      <div>
+                          <h3 className="text-sm font-medium text-gray-500">Submission Date</h3>
+                          <p className="mt-1 text-gray-700">
+                          {new Date(selectedPaper.submittedAt).toLocaleDateString()}
+                        </p>
+                      </div>
+                        
+                        <div>
+                          <h3 className="text-sm font-medium text-gray-500">Category</h3>
+                          <p className="mt-1 text-gray-700">{selectedPaper.category}</p>
+                        </div>
+                        
+                      {selectedPaper.publicationDate && (
+                        <div>
+                            <h3 className="text-sm font-medium text-gray-500">Publication Date</h3>
+                            <p className="mt-1 text-gray-700">
+                            {new Date(selectedPaper.publicationDate).toLocaleDateString()}
+                          </p>
+                        </div>
+                      )}
+                        
+                      {selectedPaper.publisher && (
+                        <div>
+                            <h3 className="text-sm font-medium text-gray-500">Publisher</h3>
+                            <p className="mt-1 text-gray-700">{selectedPaper.publisher}</p>
+                        </div>
+                      )}
+                        
+                      {selectedPaper.doi && (
+                        <div>
+                            <h3 className="text-sm font-medium text-gray-500">DOI</h3>
+                            <p className="mt-1 text-gray-700">{selectedPaper.doi}</p>
+                        </div>
+                      )}
+                        
+                        <div>
+                          <h3 className="text-sm font-medium text-gray-500">Metrics</h3>
+                          <div className="mt-1 flex items-center space-x-4">
+                            <div className="flex items-center space-x-1">
+                              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-gray-500" viewBox="0 0 20 20" fill="currentColor">
+                                <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
+                              </svg>
+                              <span>{selectedPaper.citations} Citations</span>
+                        </div>
+                            <div className="flex items-center space-x-1">
+                              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-gray-500" viewBox="0 0 20 20" fill="currentColor">
+                                <path fillRule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm3.293-7.707a1 1 0 011.414 0L9 10.586V3a1 1 0 112 0v7.586l1.293-1.293a1 1 0 111.414 1.414l-3 3a1 1 0 01-1.414 0l-3-3a1 1 0 010-1.414z" clipRule="evenodd" />
+                              </svg>
+                              <span>{selectedPaper.downloads} Downloads</span>
+                      </div>
                     </div>
                   </div>
                   
-                  {/* PDF Viewer Card */}
-                  <div className="bg-white rounded-xl shadow-md overflow-hidden">
-                    <div className="p-6 border-b border-gray-200">
-                      <h2 className="text-xl font-bold text-orion-darkGray">Paper Content</h2>
-                    </div>
-                    
-                    {hasAccess ? (
+                        {selectedPaper.blockchain && (
                       <div>
-                        <div className="border-b border-gray-200 p-4 flex justify-between items-center">
-                          <h3 className="text-lg font-medium text-orion-darkGray">Paper Content</h3>
-                          <div className="flex space-x-2">
-                            <button
-                              onClick={handleZoomOut}
-                              className="p-2 text-gray-600 hover:bg-gray-100 rounded-full"
-                              aria-label="Zoom out"
-                              tabIndex="0"
-                            >
-                              <svg className="w-5 h-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 12H4" />
+                            <h3 className="text-sm font-medium text-gray-500">Blockchain Verification</h3>
+                            <div className="mt-1 flex items-center space-x-1 text-green-600">
+                              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                                <path fillRule="evenodd" d="M2.166 4.999A11.954 11.954 0 0010 1.944 11.954 11.954 0 0017.834 5c.11.65.166 1.32.166 2.001 0 5.225-3.34 9.67-8 11.317C5.34 16.67 2 12.225 2 7c0-.682.057-1.35.166-2.001zm11.541 3.708a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
                             </svg>
-                            </button>
-                            <button
-                              onClick={handleResetZoom}
-                              className="p-2 text-gray-600 hover:bg-gray-100 rounded-full"
-                              aria-label="Reset zoom"
-                              tabIndex="0"
-                            >
-                              <svg className="w-5 h-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 15a4 4 0 004 4h9a5 5 0 10-.1-9.999 5.002 5.002 0 10-9.78 2.096A4.001 4.001 0 003 15z" />
-                              </svg>
-                            </button>
-                            <button
-                              onClick={handleZoomIn}
-                              className="p-2 text-gray-600 hover:bg-gray-100 rounded-full"
-                              aria-label="Zoom in"
-                              tabIndex="0"
-                            >
-                              <svg className="w-5 h-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                              </svg>
-                            </button>
-                            <button
-                              onClick={() => window.open(`https://ipfs.io/ipfs/${selectedPaper.ipfsCid}`, '_blank')}
-                              className="p-2 text-gray-600 hover:bg-gray-100 rounded-full"
-                              aria-label="Open in new tab"
-                              tabIndex="0"
-                            >
-                              <svg className="w-5 h-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-                              </svg>
-                            </button>
+                              <span>Verified on Blockchain</span>
                           </div>
+                            <div className="flex items-center space-x-4">
+                              <span className="text-sm text-gray-500">
+                                IPFS CID: <span className="font-mono">{selectedPaper.ipfsHash.substring(0, 8)}...</span>
+                              </span>
+                              {selectedPaper.citations > 0 && (
+                                <span className="text-sm text-gray-500">
+                                  {selectedPaper.citations} Citations
+                                </span>
+                              )}
                         </div>
-                        
-                        <div 
-                          ref={pdfContainerRef}
-                          className="overflow-auto h-[800px] bg-gray-100 relative"
-                        >
-                          <div className="min-h-full flex justify-center">
-                            {/* PDF Viewer */}
+                          </div>
+                        )}
+                              </div>
+                    </div>
+                              </div>
+                                
+                  {/* Review and votes section - for papers that have been reviewed */}
+                  {(selectedPaper.status === 'approved' || selectedPaper.status === 'verified') && (
+                    <div className="bg-white rounded-lg shadow-sm p-6 mb-6">
+                      <h2 className="text-lg font-medium text-gray-900 mb-4">Peer Review Summary</h2>
+                      
+                      <div className="flex items-center justify-between mb-6">
+                        <div className="flex items-center">
+                          <div className="mr-4">
+                            <div className="text-2xl font-semibold">{
+                              selectedPaper.votes && selectedPaper.votes.totalVotes 
+                                ? ((selectedPaper.votes.approve / selectedPaper.votes.totalVotes) * 100).toFixed(0) 
+                                : 0
+                            }%</div>
+                            <div className="text-gray-500 text-sm">Approval Rate</div>
+                          </div>
+                          
+                          <div className="w-40 bg-gray-200 rounded-full h-2.5">
                             <div 
+                              className="bg-green-600 h-2.5 rounded-full" 
                               style={{ 
-                                transform: `scale(${pdfScale})`, 
-                                transformOrigin: 'top center',
-                                transition: 'transform 0.2s ease-in-out',
+                                width: `${selectedPaper.votes && selectedPaper.votes.totalVotes 
+                                  ? ((selectedPaper.votes.approve / selectedPaper.votes.totalVotes) * 100).toFixed(0) 
+                                  : 0}%` 
                               }}
-                              className="bg-white shadow-lg my-4 w-[8.5in] min-h-[11in]"
-                            >
-                              {/* Mock PDF content - In production, use a PDF viewer library like react-pdf */}
-                              <div className="p-8">
-                                <h1 className="text-2xl font-bold mb-6 text-center">{selectedPaper.title}</h1>
-                                <div className="text-sm text-center mb-8">
-                                  <p className="font-semibold mb-2">{selectedPaper.authors.join(', ')}</p>
-                                  <p className="text-gray-600">{selectedPaper.publisher}</p>
-                                  {selectedPaper.doi && <p className="text-gray-600">DOI: {selectedPaper.doi}</p>}
+                            ></div>
                           </div>
-                                
-                                <div className="mb-6">
-                                  <h2 className="text-xl font-semibold mb-2">Abstract</h2>
-                                  <p className="text-gray-800">{selectedPaper.abstract}</p>
-                              </div>
-                                
-                                <div className="mb-6">
-                                  <h2 className="text-xl font-semibold mb-2">Keywords</h2>
-                                  <p className="text-gray-800">{selectedPaper.keywords.join(', ')}</p>
-                              </div>
-                                
-                                <div className="space-y-4">
-                                  <h2 className="text-xl font-semibold">1. Introduction</h2>
-                                  <p className="text-gray-800">
-                                    Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. 
-                                    Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat.
-                                  </p>
-                                  <p className="text-gray-800">
-                                    Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. 
-                                    Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.
-                                  </p>
-                                  
-                                  <h2 className="text-xl font-semibold">2. Methods</h2>
-                                  <p className="text-gray-800">
-                                    Sed ut perspiciatis unde omnis iste natus error sit voluptatem accusantium doloremque laudantium, 
-                                    totam rem aperiam, eaque ipsa quae ab illo inventore veritatis et quasi architecto beatae vitae dicta sunt explicabo.
-                                  </p>
-                                  
-                                  <h2 className="text-xl font-semibold">3. Results</h2>
-                                  <p className="text-gray-800">
-                                    Nemo enim ipsam voluptatem quia voluptas sit aspernatur aut odit aut fugit, sed quia consequuntur 
-                                    magni dolores eos qui ratione voluptatem sequi nesciunt.
-                                  </p>
-                                  
-                                  <div className="bg-gray-50 p-4 rounded-md border border-gray-200 my-4">
-                                    <p className="text-center font-medium mb-2">Figure 1: Sample Data Analysis</p>
-                                    <div className="h-40 bg-gray-200 flex items-center justify-center">
-                                      <p className="text-gray-500">[Figure placeholder]</p>
-                          </div>
-                                    <p className="text-sm text-gray-600 mt-2">
-                                      Caption: This figure represents the key findings of our analysis. The data shows significant trends in the studied parameters.
-                                    </p>
                                   </div>
                                   
-                                  <h2 className="text-xl font-semibold">4. Discussion</h2>
-                                  <p className="text-gray-800">
-                                    At vero eos et accusamus et iusto odio dignissimos ducimus qui blanditiis praesentium voluptatum 
-                                    deleniti atque corrupti quos dolores et quas molestias excepturi sint occaecati cupiditate non provident.
-                                  </p>
-                                  
-                                  <h2 className="text-xl font-semibold">5. Conclusion</h2>
-                                  <p className="text-gray-800">
-                                    Nam libero tempore, cum soluta nobis est eligendi optio cumque nihil impedit quo minus id quod 
-                                    maxime placeat facere possimus, omnis voluptas assumenda est, omnis dolor repellendus.
-                                  </p>
-                                </div>
-                              </div>
+                        <div className="text-right">
+                          <div className="text-lg font-medium">{selectedPaper.votes?.totalVotes || 0}</div>
+                          <div className="text-gray-500 text-sm">Reviewers</div>
                             </div>
                           </div>
                           
-                          {/* PDF page indicators */}
-                          <div className="absolute bottom-4 left-0 right-0 flex justify-center">
-                            <div className="bg-white px-4 py-2 rounded-full shadow-md text-sm text-gray-600">
-                              Page 1 of {Math.floor(Math.random() * 10) + 5}
+                      {selectedPaper.comments && selectedPaper.comments.length > 0 ? (
+                        <div>
+                          <h3 className="text-md font-medium text-gray-900 mb-2">Reviewer Comments</h3>
+                          <div className="space-y-4 max-h-60 overflow-y-auto">
+                            {selectedPaper.comments.map((comment, index) => (
+                              <div key={index} className="border-l-4 border-blue-200 pl-4 py-1">
+                                <p className="text-gray-700">{comment.text}</p>
+                                <div className="flex justify-between items-center mt-2">
+                                  <span className="text-sm text-gray-500">{
+                                    comment.createdAt ? new Date(comment.createdAt).toLocaleDateString() : 'No date'
+                                  }</span>
+                                  <span className="text-sm font-medium">{comment.reviewerName || 'Anonymous Reviewer'}</span>
                             </div>
+                          </div>
+                            ))}
+                        </div>
+                              </div>
+                      ) : (
+                        <p className="text-gray-500 italic">No reviewer comments available</p>
+                      )}
+                              </div>
+                            )}
+                          </div>
+                          
+                <div className="lg:col-span-1 space-y-6">
+                  {/* Paper file section */}
+                  <div className="bg-white rounded-lg shadow-sm p-6">
+                    <h2 className="text-lg font-medium text-gray-900 mb-4">Paper File</h2>
+                    
+                    {selectedPaper.ipfsHash ? (
+                      <>
+                        <div className="mb-4">
+                          <div className="flex items-center justify-between mb-2">
+                            <span className="text-gray-700 truncate max-w-[200px]">{selectedPaper.fileName || 'Paper.pdf'}</span>
+                            <span className="text-sm text-gray-500">{
+                              selectedPaper.fileSize ? 
+                                (selectedPaper.fileSize / 1024 / 1024).toFixed(2) + ' MB' : 
+                                'Unknown size'
+                            }</span>
+                          </div>
+                          
+                          <div className="flex space-x-2">
+                              <button
+                              onClick={handleViewPaper}
+                              className="flex-1 py-2 px-4 bg-primary text-white rounded-md hover:bg-primary-dark transition-colors flex items-center justify-center"
+                            >
+                              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-1" viewBox="0 0 20 20" fill="currentColor">
+                                <path d="M10 12a2 2 0 100-4 2 2 0 000 4z" />
+                                <path fillRule="evenodd" d="M.458 10C1.732 5.943 5.522 3 10 3s8.268 2.943 9.542 7c-1.274 4.057-5.064 7-9.542 7S1.732 14.057.458 10zM14 10a4 4 0 11-8 0 4 4 0 018 0z" clipRule="evenodd" />
+                                </svg>
+                              View
+                              </button>
                           </div>
                         </div>
                         
-                        {/* Citations, Downloads & Actions toolbar */}
-                        <div className="p-4 border-t border-gray-200 flex flex-wrap justify-between items-center">
-                          <div className="flex items-center space-x-4">
-                            <span className="text-sm text-gray-500">
-                              IPFS CID: <span className="font-mono">{selectedPaper.ipfsCid.substring(0, 8)}...</span>
-                            </span>
-                            {selectedPaper.citations > 0 && (
-                              <div className="flex items-center">
-                                <svg className="w-5 h-5 mr-1 text-gray-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z" />
-                                </svg>
-                                <span className="text-sm">{selectedPaper.citations} Citations</span>
-                              </div>
-                            )}
-                            {selectedPaper.downloads > 0 && (
-                              <div className="flex items-center">
-                                <svg className="w-5 h-5 mr-1 text-gray-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                                </svg>
-                                <span className="text-sm">{selectedPaper.downloads} Downloads</span>
-                              </div>
-                            )}
-                          </div>
-                          
-                          <div className="flex space-x-3 mt-2 sm:mt-0">
+                        {hasAccess ? (
+                          <div>
+                            <h3 className="text-sm font-medium text-gray-900 mb-2">Citation</h3>
+                            <div className="bg-gray-50 p-3 rounded-md">
+                              <p className="text-xs text-gray-700 font-mono">
+                                {selectedPaper.authors && selectedPaper.authors.join(', ')} ({
+                                  selectedPaper.publicationDate ? 
+                                    new Date(selectedPaper.publicationDate).getFullYear() : 
+                                    new Date(selectedPaper.submittedAt).getFullYear()
+                                }). {selectedPaper.title}. <em>Orion Academic Platform</em>. {
+                                  selectedPaper.doi ? `DOI: ${selectedPaper.doi}` : ''
+                                }
+                              </p>
                             <button
-                              className="inline-flex items-center px-3 py-1.5 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-orion-darkGray hover:bg-orion-mediumGray focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-orion-darkGray"
-                              tabIndex="0"
-                              aria-label="Download paper"
+                                className="mt-2 w-full py-1 px-2 text-xs bg-gray-200 text-gray-700 rounded hover:bg-gray-300 transition-colors"
                               onClick={() => {
-                                // Simulating download - in production would trigger actual download
-                                alert('Downloading paper...');
-                              }}
-                            >
-                              <svg className="mr-1.5 -ml-1 h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                              </svg>
-                              Download PDF
-                            </button>
-                            
-                            {selectedPaper.blockchain && (
-                              <button
-                                className="inline-flex items-center px-3 py-1.5 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-orion-darkGray bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-orion-darkGray"
-                                tabIndex="0"
-                                aria-label="View blockchain verification"
-                                onClick={() => {
-                                  // Would open blockchain explorer with verification details
-                                  alert('Opening blockchain verification...');
+                                  navigator.clipboard.writeText(
+                                    `${selectedPaper.authors && selectedPaper.authors.join(', ')} (${
+                                      selectedPaper.publicationDate ? 
+                                        new Date(selectedPaper.publicationDate).getFullYear() : 
+                                        new Date(selectedPaper.submittedAt).getFullYear()
+                                    }). ${selectedPaper.title}. Orion Academic Platform. ${
+                                      selectedPaper.doi ? `DOI: ${selectedPaper.doi}` : ''
+                                    }`
+                                  );
+                                  // Show toast or notification that citation was copied
                                 }}
                               >
-                                <svg className="mr-1.5 -ml-1 h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-                                </svg>
-                                View on Blockchain
-                              </button>
-                            )}
-                            
-                            <button
-                              className="inline-flex items-center px-3 py-1.5 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-orion-darkGray bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-orion-darkGray"
-                              tabIndex="0"
-                              aria-label="Cite this paper"
-                              onClick={() => {
-                                // Would show citation formats
-                                alert('Showing citation formats...');
-                              }}
-                            >
-                              <svg className="mr-1.5 -ml-1 h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7v8a2 2 0 002 2h6M8 7V5a2 2 0 012-2h4.586a1 1 0 01.707.293l4.414 4.414a1 1 0 01.293.707V15a2 2 0 01-2 2h-2" />
-                              </svg>
-                              Cite
+                                Copy Citation
                             </button>
-                          </div>
                         </div>
                       </div>
                     ) : (
-                      // Payment required UI
-                      <div className="bg-gray-50 p-8">
-                        <div className="text-center mb-8">
-                          <svg className="w-16 h-16 text-orion-darkGray mx-auto mb-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
-                          </svg>
-                          <h3 className="text-lg font-medium text-orion-darkGray mb-2">
-                            Access Required
-                          </h3>
-                          <p className="text-gray-500 max-w-md mx-auto mb-6">
-                            This paper requires payment to access. Your payment will support the authors and the Orion platform.
-                          </p>
-                          
-                          <div className="border border-gray-200 rounded-lg p-4 max-w-sm mx-auto mb-6">
-                            <div className="flex justify-between items-center pb-3 border-b border-gray-200 mb-3">
-                              <span className="font-medium text-orion-darkGray">Access Fee:</span>
-                              <div className="flex items-center">
-                                <svg className="w-5 h-5 text-gray-600 mr-1" viewBox="0 0 33 53" fill="none" xmlns="http://www.w3.org/2000/svg">
-                                  <path d="M16.3576 0L16 1.11273V36.3028L16.3576 36.6611L32.2976 27.5559L16.3576 0Z" fill="#343434"/>
-                                  <path d="M16.3578 0L0.417847 27.5559L16.3578 36.6611V19.6374V0Z" fill="#8C8C8C"/>
-                                  <path d="M16.3575 39.7374L16.1567 39.9827V52.4515L16.3575 53L32.3066 30.6377L16.3575 39.7374Z" fill="#3C3C3B"/>
-                                  <path d="M16.3578 53.0001V39.7375L0.417847 30.6378L16.3578 53.0001Z" fill="#8C8C8C"/>
-                                  <path d="M16.3575 36.6611L32.2973 27.556L16.3575 19.6375V36.6611Z" fill="#141414"/>
-                                  <path d="M0.417847 27.556L16.3576 36.6611V19.6375L0.417847 27.556Z" fill="#393939"/>
-                                </svg>
-                                <span className="text-xl font-bold text-orion-darkGray">{selectedPaper.accessFee} ETH</span>
-                              </div>
-                            </div>
-                            <p className="text-xs text-gray-500 mb-3">
-                              Payment is made directly to the authors through the blockchain. Your access will be permanently recorded.
-                            </p>
-                          </div>
+                          <div className="border-t border-gray-200 pt-4 mt-4">
+                            <div className="mb-4 text-center">
+                              <p className="text-gray-700 mb-2">
+                                Access to this paper requires payment
+                              </p>
+                              <p className="text-2xl font-semibold mb-2">
+                                {selectedPaper.accessFee} ETH
+                              </p>
                         </div>
                         
-                        <div className="flex justify-center">
                           <button
+                              className={`w-full py-2 px-4 rounded-md text-white transition-colors ${
+                                isPaymentProcessing ? 
+                                  'bg-gray-400 cursor-not-allowed' : 
+                                  'bg-primary hover:bg-primary-dark'
+                              }`}
                             onClick={handlePayForAccess}
                             disabled={isPaymentProcessing}
-                            className={`
-                              inline-flex items-center px-6 py-3 border border-transparent rounded-md shadow-sm text-base font-medium text-white 
-                              ${isPaymentProcessing ? 'bg-gray-400 cursor-not-allowed' : 'bg-orion-darkGray hover:bg-orion-mediumGray'} 
-                              focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-orion-darkGray
-                            `}
-                            tabIndex="0"
-                            aria-label="Pay for access"
                           >
                             {isPaymentProcessing ? (
-                              <>
-                                <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                <span className="flex items-center justify-center">
+                                  <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                                   <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                                   <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                                 </svg>
-                                Processing Payment...
+                                  Processing...
+                                </span>
+                              ) : 'Pay for Access'}
+                            </button>
+                          </div>
+                        )}
                               </>
                             ) : (
-                              <>
-                                <svg className="mr-2 -ml-1 h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                      <div className="text-center py-6">
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-12 w-12 mx-auto text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                                 </svg>
-                                Pay for Access Now
-                              </>
-                            )}
-                          </button>
-                        </div>
+                        <p className="mt-2 text-gray-500">Paper file not available</p>
                       </div>
                     )}
-                  </div>
                 </div>
                 
-                {/* Right column - AI Q&A */}
-                <div className="space-y-6">
-                  <div className="bg-white rounded-xl shadow-md overflow-hidden h-full flex flex-col">
-                    <div className="p-6 border-b border-gray-200">
-                      <h2 className="text-xl font-bold text-orion-darkGray">AI Paper Assistant</h2>
-                      <p className="text-sm text-gray-500 mt-1">
-                        Ask questions about this paper and get instant answers
-                      </p>
-                    </div>
+                  {/* AI Q&A section */}
+                  <div className="bg-white rounded-lg shadow-sm p-6">
+                    <h2 className="text-lg font-medium text-gray-900 mb-4">Ask AI About This Paper</h2>
                     
-                    {/* Message container */}
-                    <div className="flex-1 p-4 bg-gray-50 overflow-y-auto h-96" id="chat-container">
+                    {hasAccess ? (
+                      <>
+                        <div 
+                          ref={chatContainerRef}
+                          className="h-64 overflow-y-auto mb-4 space-y-3 border border-gray-200 rounded-md p-3 bg-gray-50"
+                        >
                       {answers.length === 0 ? (
-                        <div className="flex flex-col items-center justify-center h-full text-center">
-                          <svg className="w-16 h-16 text-gray-300 mb-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
-                          </svg>
-                          <h3 className="text-lg font-medium text-gray-500 mb-1">No Questions Yet</h3>
-                          <p className="text-gray-400 max-w-xs">
-                            Ask a question about this paper to get insights from our AI assistant
-                          </p>
+                            <div className="text-center text-gray-500 py-6">
+                              <p>Ask a question about this paper to get started</p>
+                              <p className="text-xs mt-2">AI will analyze the paper and answer your questions</p>
                         </div>
                       ) : (
-                        <div className="space-y-4">
-                          {answers.map((answer, index) => (
+                            answers.map((answer, index) => (
                             <div
                               key={index}
-                              className={`flex ${answer.type === 'question' ? 'justify-end' : 'justify-start'}`}
-                            >
-                              {answer.type === 'typing' ? (
-                                <div className="max-w-xs md:max-w-md rounded-lg p-3 bg-white border border-gray-200 text-orion-darkGray rounded-bl-none">
-                                  <div className="flex space-x-2">
-                                    <div className="h-2 w-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></div>
-                                    <div className="h-2 w-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></div>
-                                    <div className="h-2 w-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '600ms' }}></div>
+                                className={`p-2 rounded-lg max-w-[85%] ${
+                                  answer.sender === 'user' ? 
+                                    'bg-primary text-white ml-auto' : 
+                                    answer.sender === 'ai' ? 
+                                      'bg-gray-200 text-gray-800' : 
+                                      'bg-yellow-100 text-yellow-800 mx-auto text-center'
+                                }`}
+                              >
+                                <p className="text-sm">{answer.text}</p>
+                                <span className="text-xs opacity-70 block text-right mt-1">
+                                  {new Date(answer.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+                                </span>
                                   </div>
-                                </div>
-                              ) : (
-                                <div 
-                                  className={`
-                                    max-w-xs md:max-w-md rounded-lg p-3 
-                                    ${answer.type === 'question' 
-                                      ? 'bg-orion-darkGray text-white rounded-br-none' 
-                                      : 'bg-white border border-gray-200 text-orion-darkGray rounded-bl-none'}
-                                  `}
-                                >
-                                  <p className="text-sm whitespace-pre-wrap">{answer.content}</p>
-                                  <p className="text-xs mt-1 opacity-70 text-right">
-                                    {new Date(answer.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                                  </p>
-                                </div>
-                              )}
+                            ))
+                          )}
+                          {isAiLoading && (
+                            <div className="bg-gray-200 text-gray-800 p-2 rounded-lg max-w-[85%]">
+                              <div className="flex space-x-1 items-center justify-center p-2">
+                                <div className="w-2 h-2 bg-gray-500 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></div>
+                                <div className="w-2 h-2 bg-gray-500 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></div>
+                                <div className="w-2 h-2 bg-gray-500 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></div>
                             </div>
-                          ))}
                         </div>
                       )}
                     </div>
                     
-                    {/* Input form */}
-                    <div className="p-4 border-t border-gray-200">
-                      <form 
-                        onSubmit={(e) => {
-                          e.preventDefault();
-                          handleAskQuestion();
-                        }}
-                        className="flex space-x-2"
-                      >
+                        <div className="flex items-center">
                         <input
                           type="text"
                           value={question}
                           onChange={(e) => setQuestion(e.target.value)}
-                          className="flex-1 px-4 py-2 rounded-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-orion-darkGray focus:border-transparent"
+                            onKeyPress={(e) => e.key === 'Enter' && handleAskQuestion()}
+                            className="flex-1 border border-gray-300 rounded-l-md py-2 px-3 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
                           placeholder="Ask a question about this paper..."
-                          disabled={isAiLoading || !hasAccess}
-                          tabIndex="0"
+                            disabled={isAiLoading}
                         />
                         <button
-                          type="submit"
-                          disabled={isAiLoading || !question.trim() || !hasAccess}
-                          className={`
-                            inline-flex items-center px-4 py-2 border border-transparent rounded-lg shadow-sm text-sm font-medium text-white 
-                            ${isAiLoading || !question.trim() || !hasAccess ? 'bg-gray-400 cursor-not-allowed' : 'bg-orion-darkGray hover:bg-orion-mediumGray'} 
-                            focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-orion-darkGray
-                          `}
-                          tabIndex="0"
-                          aria-label="Send question"
-                        >
-                          {isAiLoading ? (
-                            <svg className="animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                            onClick={handleAskQuestion}
+                            disabled={isAiLoading || !question.trim()}
+                            className={`py-2 px-4 rounded-r-md text-white ${
+                              isAiLoading || !question.trim() ? 
+                                'bg-gray-400 cursor-not-allowed' : 
+                                'bg-primary hover:bg-primary-dark'
+                            }`}
+                          >
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                              <path fillRule="evenodd" d="M10.293 3.293a1 1 0 011.414 0l6 6a1 1 0 010 1.414l-6 6a1 1 0 01-1.414-1.414L14.586 11H3a1 1 0 110-2h11.586l-4.293-4.293a1 1 0 010-1.414z" clipRule="evenodd" />
                             </svg>
-                          ) : (
-                            <svg className="h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 5l7 7-7 7M5 5l7 7-7 7" />
-                            </svg>
-                          )}
                         </button>
-                      </form>
-                      
-                      {!hasAccess && (
-                        <p className="mt-2 text-sm text-red-500">
-                          You need to pay for access to use the AI assistant.
+                    </div>
+                        <p className="text-xs text-gray-500 mt-2">
+                          AI responses are generated based on the paper's content and may not be fully accurate.
                         </p>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            ) : (
-              // Paper list view
-              <div className="bg-white rounded-xl shadow-md p-6">
-                <div className="mb-6 flex justify-between items-center">
-                  <h2 className="text-xl font-bold text-orion-darkGray">Your Published Papers</h2>
-                  <div className="flex items-center space-x-2">
-                    <select 
-                      className="p-2 text-sm rounded-md border border-gray-300 focus:outline-none focus:ring-2 focus:ring-orion-darkGray focus:border-transparent"
-                      defaultValue="all"
-                    >
-                      <option value="all">All Papers</option>
-                      <option value="approved">Approved</option>
-                      <option value="verified">Verified</option>
-                      <option value="rejected">Rejected</option>
-                      <option value="pending">Under Review</option>
-                    </select>
-                    <div className="relative">
-                      <input 
-                        type="text" 
-                        placeholder="Search papers..." 
-                        className="p-2 pl-8 text-sm rounded-md border border-gray-300 focus:outline-none focus:ring-2 focus:ring-orion-darkGray focus:border-transparent"
-                      />
-                      <svg 
-                        className="w-4 h-4 text-gray-400 absolute left-2 top-2.5" 
-                        xmlns="http://www.w3.org/2000/svg" 
-                        fill="none" 
-                        viewBox="0 0 24 24" 
-                        stroke="currentColor"
-                      >
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                      </svg>
-                    </div>
-                  </div>
-                </div>
-                
-                {papers.length === 0 ? (
-                  <div className="text-center py-10">
-                    <svg 
-                      className="w-16 h-16 text-gray-300 mx-auto mb-4" 
-                      xmlns="http://www.w3.org/2000/svg" 
-                      fill="none" 
-                      viewBox="0 0 24 24" 
-                      stroke="currentColor"
-                    >
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                    </svg>
-                    <h3 className="text-lg font-medium text-gray-500 mb-2">No papers found</h3>
-                    <p className="text-gray-400 max-w-md mx-auto mb-6">
-                      You haven't submitted any papers yet or none match your current filters.
-                    </p>
-                    <button
-                      onClick={() => navigate('/submit-paper')}
-                      className="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-orion-darkGray hover:bg-orion-mediumGray focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-orion-darkGray"
-                      tabIndex="0"
-                      aria-label="Submit a new paper"
-                    >
-                      <svg className="-ml-1 mr-2 h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
-                      </svg>
-                      Submit a Paper
-                    </button>
-                  </div>
-                ) : (
-                  <div className="grid grid-cols-1 gap-6">
-                    {papers.map((paper) => (
-                      <div
-                        key={paper.id}
-                        className="border border-gray-200 rounded-lg p-6 hover:shadow-md transition-shadow duration-200"
-                      >
-                        <div className="flex justify-between">
-                          <div className="flex-1">
-                            <div className="flex items-center space-x-2 mb-2">
-                              <h3 
-                                className="text-lg font-semibold text-orion-darkGray hover:text-orion-mediumGray cursor-pointer"
-                                onClick={() => handleSelectPaper(paper)}
-                                tabIndex="0"
-                                onKeyDown={(e) => {
-                                  if (e.key === 'Enter' || e.key === ' ') handleSelectPaper(paper);
-                                }}
-                              >
-                                {paper.title}
-                              </h3>
-                              {paper.status === 'approved' && (
-                                <span className="px-2 py-1 text-xs font-medium rounded-full bg-green-100 text-green-800">
-                                  Approved
-                                </span>
-                              )}
-                              {paper.status === 'verified' && (
-                                <span className="px-2 py-1 text-xs font-medium rounded-full bg-blue-100 text-blue-800">
-                                  Verified
-                                </span>
-                              )}
-                              {paper.status === 'rejected' && (
-                                <span className="px-2 py-1 text-xs font-medium rounded-full bg-red-100 text-red-800">
-                                  Rejected
-                                </span>
-                              )}
-                              {paper.status === 'pending' && (
-                                <span className="px-2 py-1 text-xs font-medium rounded-full bg-yellow-100 text-yellow-800">
-                                  Under Review
-                                </span>
-                              )}
-                              {paper.blockchain && (
-                                <span className="px-2 py-1 text-xs font-medium rounded-full bg-indigo-100 text-indigo-800">
-                                  Blockchain Verified
-                                </span>
-                              )}
-                            </div>
-                            <p className="text-gray-500 text-sm mb-3 line-clamp-2">
-                              {paper.abstract}
-                            </p>
-                            <div className="flex flex-wrap gap-x-4 gap-y-2 text-sm text-gray-500">
-                              <div className="flex items-center">
-                                <svg className="w-4 h-4 mr-1" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-                                </svg>
-                                <span>
-                                  {paper.authors.length > 1
-                                    ? `${paper.authors[0]} +${paper.authors.length - 1}`
-                                    : paper.authors[0]}
-                                </span>
-                              </div>
-                              <div className="flex items-center">
-                                <svg className="w-4 h-4 mr-1" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" />
-                                </svg>
-                                <span>{paper.category}</span>
-                              </div>
-                              <div className="flex items-center">
-                                <svg className="w-4 h-4 mr-1" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                                </svg>
-                                <span>{new Date(paper.submittedAt).toLocaleDateString()}</span>
-                              </div>
-                              {paper.publicationDate && (
-                                <div className="flex items-center">
-                                  <svg className="w-4 h-4 mr-1" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                                  </svg>
-                                  <span>Published: {new Date(paper.publicationDate).toLocaleDateString()}</span>
+                      </>
+                    ) : (
+                      <div className="text-center py-4">
+                        <p className="text-gray-500">Purchase access to use AI Q&A</p>
                                 </div>
                               )}
                             </div>
                           </div>
-                          
-                          <div className="flex flex-col ml-6 text-center justify-center">
-                            {paper.doi && (
-                              <div className="mb-2 text-xs text-gray-500">DOI: {paper.doi}</div>
-                            )}
-                            <div className="flex space-x-2 mb-2">
-                              {paper.citations > 0 && (
-                                <div className="flex flex-col items-center">
-                                  <span className="text-lg font-medium text-orion-darkGray">{paper.citations}</span>
-                                  <span className="text-xs text-gray-500">Citations</span>
-                                </div>
-                              )}
-                              {paper.downloads > 0 && (
-                                <div className="flex flex-col items-center">
-                                  <span className="text-lg font-medium text-orion-darkGray">{paper.downloads}</span>
-                                  <span className="text-xs text-gray-500">Downloads</span>
-                                </div>
-                              )}
-                            </div>
-                            <button
-                              onClick={() => handleSelectPaper(paper)}
-                              className="mt-2 inline-flex items-center px-3 py-1.5 border border-transparent rounded-md text-xs font-medium text-white bg-orion-darkGray hover:bg-orion-mediumGray focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-orion-darkGray"
-                              tabIndex="0"
-                              aria-label={`View details of ${paper.title}`}
-                            >
-                              View Details
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
               </div>
             )}
           </>

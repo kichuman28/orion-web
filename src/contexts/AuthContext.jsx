@@ -10,6 +10,7 @@ import {
 } from 'firebase/auth';
 import { doc, setDoc, getDoc, collection, query, where, getDocs, deleteDoc, serverTimestamp } from 'firebase/firestore';
 import { auth, db } from '../config/firebase';
+import { ethers } from 'ethers';
 
 const AuthContext = createContext();
 
@@ -19,6 +20,171 @@ export function AuthProvider({ children }) {
   const [currentUser, setCurrentUser] = useState(null);
   const [userRole, setUserRole] = useState('user'); // Default role
   const [loading, setLoading] = useState(true);
+  
+  // Wallet state
+  const [walletAddress, setWalletAddress] = useState('');
+  const [isConnectingWallet, setIsConnectingWallet] = useState(false);
+  const [provider, setProvider] = useState(null);
+  const [signer, setSigner] = useState(null);
+  const [connectionError, setConnectionError] = useState('');
+  const [walletBalance, setWalletBalance] = useState(null);
+
+  // Chain details for Open Campus
+  const chainDetails = {
+    chainId: '0xA045C', // 655854 in hex
+    chainName: 'EDU Chain Testnet',
+    rpcUrls: ['https://open-campus-codex-sepolia.drpc.org'],
+    blockExplorerUrls: ['https://opencampus-codex.blockscout.com'],
+    nativeCurrency: {
+      name: 'EDU',
+      symbol: 'EDU',
+      decimals: 18
+    }
+  };
+
+  // Check if wallet was previously connected
+  useEffect(() => {
+    const savedWalletAddress = localStorage.getItem('walletAddress');
+    if (savedWalletAddress) {
+      setWalletAddress(savedWalletAddress);
+      // We don't automatically connect to prevent security issues,
+      // but we can show the user they had a wallet previously connected
+    }
+  }, []);
+
+  // Connect wallet function
+  const connectWallet = async () => {
+    if (!window.ethereum) {
+      setConnectionError('MetaMask not detected. Please install MetaMask first.');
+      return null;
+    }
+
+    try {
+      setIsConnectingWallet(true);
+      setConnectionError('');
+
+      // Request account access
+      const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
+      const address = accounts[0];
+      
+      // Create ethers provider and signer
+      const ethProvider = new ethers.BrowserProvider(window.ethereum);
+      const ethSigner = await ethProvider.getSigner();
+      
+      // Check if the chain ID matches
+      const network = await ethProvider.getNetwork();
+      const currentChainId = `0x${network.chainId.toString(16)}`;
+      
+      // Switch to EDU Chain if not already on it
+      if (currentChainId.toLowerCase() !== chainDetails.chainId.toLowerCase()) {
+        try {
+          // Try to switch to the EDU Chain
+          await window.ethereum.request({
+            method: 'wallet_switchEthereumChain',
+            params: [{ chainId: chainDetails.chainId }],
+          });
+        } catch (switchError) {
+          // This error code indicates that the chain has not been added to MetaMask
+          if (switchError.code === 4902) {
+            try {
+              await window.ethereum.request({
+                method: 'wallet_addEthereumChain',
+                params: [chainDetails],
+              });
+            } catch (addError) {
+              throw new Error('Failed to add EDU Chain to MetaMask');
+            }
+          } else {
+            throw switchError;
+          }
+        }
+      }
+      
+      // Get the balance
+      const balance = await ethProvider.getBalance(address);
+      const formattedBalance = ethers.formatEther(balance);
+      
+      // Update state with wallet connection details
+      setWalletAddress(address);
+      setProvider(ethProvider);
+      setSigner(ethSigner);
+      setWalletBalance(formattedBalance);
+      
+      // Save wallet address to localStorage
+      localStorage.setItem('walletAddress', address);
+      
+      // Store wallet address in user document if authenticated
+      if (currentUser) {
+        await setDoc(doc(db, 'users', currentUser.uid), {
+          walletAddress: address
+        }, { merge: true });
+      }
+      
+      // Set up listeners for account and chain changes
+      window.ethereum.on('accountsChanged', handleAccountsChanged);
+      window.ethereum.on('chainChanged', handleChainChanged);
+      
+      return { address, signer: ethSigner };
+    } catch (error) {
+      console.error('Error connecting wallet:', error);
+      setConnectionError(error.message || 'Failed to connect wallet');
+      return null;
+    } finally {
+      setIsConnectingWallet(false);
+    }
+  };
+  
+  // Handle account change in MetaMask
+  const handleAccountsChanged = async (accounts) => {
+    if (accounts.length === 0) {
+      // User has disconnected their wallet
+      disconnectWallet();
+    } else {
+      // User has switched accounts
+      const newAddress = accounts[0];
+      setWalletAddress(newAddress);
+      localStorage.setItem('walletAddress', newAddress);
+      
+      // Update balance
+      if (provider) {
+        const balance = await provider.getBalance(newAddress);
+        setWalletBalance(ethers.formatEther(balance));
+      }
+      
+      // Update the user's wallet address in Firestore
+      if (currentUser) {
+        await setDoc(doc(db, 'users', currentUser.uid), {
+          walletAddress: newAddress
+        }, { merge: true });
+      }
+    }
+  };
+  
+  // Handle chain change in MetaMask
+  const handleChainChanged = (_chainId) => {
+    // We recommend reloading the page unless you have good reason not to
+    window.location.reload();
+  };
+  
+  // Disconnect wallet function
+  const disconnectWallet = () => {
+    setWalletAddress('');
+    setProvider(null);
+    setSigner(null);
+    setWalletBalance(null);
+    localStorage.removeItem('walletAddress');
+    
+    // Remove event listeners
+    if (window.ethereum) {
+      window.ethereum.removeListener('accountsChanged', handleAccountsChanged);
+      window.ethereum.removeListener('chainChanged', handleChainChanged);
+    }
+  };
+
+  // Check if wallet is connected
+  const isWalletConnected = () => {
+    return !!walletAddress;
+  };
 
   // Sign up function
   const signup = async (email, password, fullName) => {
@@ -32,7 +198,8 @@ export function AuthProvider({ children }) {
         email,
         fullName,
         role: 'user', // Default role for new users
-        createdAt: new Date().toISOString()
+        createdAt: new Date().toISOString(),
+        walletAddress: walletAddress || null // Include wallet if already connected
       });
       
       return user;
@@ -223,17 +390,30 @@ export function AuthProvider({ children }) {
     return unsubscribe;
   }, []);
 
+  // Value to be provided by the context
   const value = {
     currentUser,
     userRole,
     loading,
-    login,
     signup,
+    login,
+    loginWithGoogle,
     logout,
     resetPassword,
-    loginWithGoogle,
-    fetchUserRole, // Explicitly expose fetchUserRole
-    setUserRole // Expose setUserRole for direct state updates
+    updateUserRole,
+    fetchUserRole,
+    
+    // Wallet-related values and functions
+    walletAddress,
+    isConnectingWallet,
+    walletBalance,
+    connectionError,
+    connectWallet,
+    disconnectWallet,
+    isWalletConnected,
+    provider,
+    signer,
+    chainDetails
   };
 
   console.log("Current user:", currentUser?.uid);

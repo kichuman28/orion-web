@@ -1,22 +1,25 @@
-import { useState, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import DashboardLayout from '../components/DashboardLayout';
+import IPFSFileUploader from '../components/IPFSFileUploader';
+import { getIPFSGatewayURL } from '../config/ipfs';
+import { doc, setDoc, collection, serverTimestamp } from 'firebase/firestore';
+import { db } from '../config/firebase';
 
 const SubmitPaper = () => {
-  const { currentUser } = useAuth();
+  const { currentUser, walletAddress, isWalletConnected, connectWallet } = useAuth();
   const navigate = useNavigate();
-  const fileInputRef = useRef(null);
   
   // Form state
   const [title, setTitle] = useState('');
   const [abstract, setAbstract] = useState('');
   const [teamMembers, setTeamMembers] = useState('');
   const [researchField, setResearchField] = useState('');
-  const [file, setFile] = useState(null);
   const [fileName, setFileName] = useState('');
   const [fileSize, setFileSize] = useState(0);
   const [stakeAmount] = useState(0.05); // Fixed stake amount in ETH
+  const [ipfsResult, setIpfsResult] = useState(null);
   
   // UI state
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -45,33 +48,23 @@ const SubmitPaper = () => {
     'Other'
   ];
   
-  // Handle file selection
-  const handleFileChange = (e) => {
-    if (e.target.files.length > 0) {
-      const selectedFile = e.target.files[0];
-      
-      // Check file type (only PDF allowed)
-      if (selectedFile.type !== 'application/pdf') {
-        setError('Only PDF files are accepted');
-        return;
-      }
-      
-      // Check file size (max 10MB)
-      if (selectedFile.size > 10 * 1024 * 1024) {
-        setError('File size exceeds 10MB limit');
-        return;
-      }
-      
-      setFile(selectedFile);
-      setFileName(selectedFile.name);
-      setFileSize(selectedFile.size);
-      setError('');
-    }
+  // Handle IPFS upload completion
+  const handleFileUploaded = (result, file) => {
+    console.log('File uploaded to IPFS:', result);
+    setIpfsResult(result);
+    setFileName(file.name);
+    setFileSize(file.size);
   };
   
   // Handle form submission
   const handleSubmit = async (e) => {
     e.preventDefault();
+    
+    // Check if wallet is connected
+    if (!isWalletConnected()) {
+      setError('Please connect your wallet first to submit a paper');
+      return;
+    }
     
     // Form validation
     if (!title.trim()) {
@@ -89,8 +82,10 @@ const SubmitPaper = () => {
       return;
     }
     
-    if (!file) {
-      setError('Please upload your paper (PDF format)');
+    // If we already have an IPFS result, we can move to step 2
+    // Otherwise, we need to show an error
+    if (!ipfsResult) {
+      setError('Please upload your paper (PDF format) to IPFS first');
       return;
     }
     
@@ -100,18 +95,26 @@ const SubmitPaper = () => {
   
   // Handle final submission with stake
   const handleStakeAndSubmit = async () => {
+    // Double-check wallet connection
+    if (!isWalletConnected()) {
+      setError('Please connect your wallet first to submit a paper');
+      return;
+    }
+    
     try {
       setIsSubmitting(true);
       setError('');
       
-      // 1. Upload file to IPFS (mock implementation)
-      await uploadToIPFS();
+      // We already have the IPFS result from the uploader
+      if (!ipfsResult) {
+        throw new Error('File not uploaded to IPFS');
+      }
       
-      // 2. Process payment/stake on blockchain (mock implementation)
+      // Process payment/stake on blockchain (mock implementation)
       await processStake();
       
-      // 3. Store metadata in Firestore (mock implementation)
-      await storeMetadata();
+      // Store metadata in Firestore
+      await storeMetadata(ipfsResult);
       
       // Success! Navigate to confirmation or dashboard
       navigate('/dashboard', { 
@@ -125,423 +128,358 @@ const SubmitPaper = () => {
     }
   };
   
-  // Mock IPFS upload with progress
-  const uploadToIPFS = () => {
-    return new Promise((resolve) => {
-      let progress = 0;
-      const interval = setInterval(() => {
-        progress += 10;
-        setUploadProgress(progress);
-        
-        if (progress >= 100) {
-          clearInterval(interval);
-          resolve('QmYourIPFSHashHere'); // Mock IPFS CID
-        }
-      }, 300);
-    });
+  // Store paper metadata in Firestore
+  const storeMetadata = async (ipfsResult) => {
+    if (!currentUser) throw new Error('User not authenticated');
+    if (!ipfsResult || !ipfsResult.IpfsHash) throw new Error('Invalid IPFS result');
+    if (!walletAddress) throw new Error('Wallet not connected');
+    
+    try {
+      // Create a new paper document in Firestore
+      const paperRef = doc(collection(db, 'papers'));
+      const paperData = {
+        id: paperRef.id,
+        title,
+        abstract,
+        researchField,
+        teamMembers: teamMembers || '',
+        authorUid: currentUser.uid,
+        authorEmail: currentUser.email,
+        authorName: currentUser.displayName || 'Anonymous Researcher',
+        authorWallet: walletAddress,
+        ipfsHash: ipfsResult.IpfsHash,
+        fileUrl: getIPFSGatewayURL(ipfsResult.IpfsHash),
+        fileName,
+        fileSize,
+        stakeAmount,
+        status: 'pending',
+        submissionDate: serverTimestamp(),
+        votes: {
+          approve: 0,
+          reject: 0,
+          totalVotes: 0
+        },
+        comments: []
+      };
+      
+      await setDoc(paperRef, paperData);
+      return paperRef.id;
+    } catch (error) {
+      console.error('Firestore storage error:', error);
+      throw new Error(`Failed to store metadata: ${error.message}`);
+    }
+  };
+  
+  // Handle wallet connection
+  const handleConnectWallet = async () => {
+    try {
+      await connectWallet();
+    } catch (err) {
+      console.error('Failed to connect wallet:', err);
+      setError('Failed to connect wallet. Please try again.');
+    }
   };
   
   // Mock blockchain stake transaction
-  const processStake = () => {
-    return new Promise((resolve) => {
-      setTimeout(() => {
-        resolve('0xYourTransactionHashHere');
-      }, 2000);
-    });
-  };
-  
-  // Mock Firestore storage
-  const storeMetadata = () => {
-    return new Promise((resolve) => {
-      setTimeout(() => {
-        resolve();
-      }, 1000);
-    });
+  const processStake = async () => {
+    if (!isWalletConnected()) {
+      throw new Error('Wallet connection required for staking');
+    }
+    
+    // Since we have access to the wallet through AuthContext, we could
+    // implement a real blockchain transaction here using ethers.js
+    
+    try {
+      // In a real implementation, this would use the signer from AuthContext
+      // to send a transaction to the smart contract
+      
+      // Mock blockchain transaction with a delay to simulate network time
+      return new Promise((resolve) => {
+        console.log(`Processing stake of ${stakeAmount} ETH from ${walletAddress}`);
+        setTimeout(() => {
+          // Mock transaction hash
+          resolve('0x' + Math.random().toString(16).substring(2, 42));
+        }, 2000);
+      });
+    } catch (error) {
+      console.error('Blockchain transaction error:', error);
+      throw new Error(`Stake transaction failed: ${error.message}`);
+    }
   };
   
   // Format file size for display
   const formatFileSize = (bytes) => {
-    if (bytes < 1024) return bytes + ' bytes';
-    else if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
-    else return (bytes / 1048576).toFixed(1) + ' MB';
+    if (bytes === 0) return '0 Bytes';
+    const k = 1024;
+    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
   };
   
   return (
     <DashboardLayout>
-      <div className="max-w-4xl mx-auto">
-        {/* Header */}
-        <div className="mb-8">
-          <h1 className="text-2xl font-bold text-orion-darkGray mb-2">
-            Submit Academic Paper
-          </h1>
-          <p className="text-gray-600">
-            Submit your research for review, verification, and blockchain certification.
-          </p>
-        </div>
+      <div className="max-w-4xl mx-auto px-4 py-8">
+        <h1 className="text-2xl font-bold text-gray-900 mb-6">Submit Research Paper</h1>
         
-        {/* Progress steps */}
-        <div className="mb-8">
-          <div className="flex items-center justify-between">
+        {/* Wallet connection notice */}
+        {!isWalletConnected() && (
+          <div className="bg-yellow-50 border border-yellow-200 text-yellow-800 px-4 py-3 rounded mb-6" role="alert">
             <div className="flex items-center">
-              <div className={`rounded-full h-10 w-10 flex items-center justify-center ${
-                step >= 1 ? 'bg-orion-darkGray text-white' : 'bg-gray-200 text-gray-500'
-              }`}>
-                1
-              </div>
-              <div className="ml-2">
-                <div className="text-sm font-medium text-orion-darkGray">Paper Details</div>
-              </div>
+              <svg className="h-5 w-5 text-yellow-600 mr-2" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+                <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
+              </svg>
+              <span className="font-medium">Wallet connection required!</span>
             </div>
-            
-            <div className="flex-1 mx-4">
-              <div className={`h-1 ${step >= 2 ? 'bg-orion-darkGray' : 'bg-gray-200'}`}></div>
+            <p className="mt-1 ml-7">You need to connect your wallet to submit a paper. Staking requires a connected wallet.</p>
+            <div className="mt-3 ml-7">
+              <button
+                onClick={handleConnectWallet}
+                className="px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-yellow-600 hover:bg-yellow-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-yellow-500"
+              >
+                Connect Wallet
+              </button>
             </div>
-            
-            <div className="flex items-center">
-              <div className={`rounded-full h-10 w-10 flex items-center justify-center ${
-                step >= 2 ? 'bg-orion-darkGray text-white' : 'bg-gray-200 text-gray-500'
-              }`}>
-                2
-              </div>
-              <div className="ml-2">
-                <div className="text-sm font-medium text-orion-darkGray">Stake & Submit</div>
-              </div>
-            </div>
-          </div>
-        </div>
-        
-        {/* Error display */}
-        {error && (
-          <div className="mb-6 p-4 bg-red-50 border-l-4 border-red-500 text-red-700">
-            <p className="font-medium">Submission Error</p>
-            <p>{error}</p>
           </div>
         )}
         
-        {/* Step 1: Paper details form */}
+        {/* Step indicator */}
+        <div className="mb-8">
+          <div className="flex items-center">
+            <div className={`flex items-center justify-center w-8 h-8 rounded-full ${step >= 1 ? 'bg-orion-primary' : 'bg-gray-300'} text-white`}>
+              1
+            </div>
+            <div className={`flex-1 h-1 mx-2 ${step >= 2 ? 'bg-orion-primary' : 'bg-gray-300'}`}></div>
+            <div className={`flex items-center justify-center w-8 h-8 rounded-full ${step >= 2 ? 'bg-orion-primary' : 'bg-gray-300'} text-white`}>
+              2
+            </div>
+          </div>
+          <div className="flex justify-between mt-2">
+            <div className="text-sm text-gray-600">Paper Details</div>
+            <div className="text-sm text-gray-600">Review & Stake</div>
+          </div>
+        </div>
+        
+        {error && (
+          <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded mb-4" role="alert">
+            {error}
+          </div>
+        )}
+        
+        {/* Step 1: Paper Details Form */}
         {step === 1 && (
-          <form onSubmit={handleSubmit} className="bg-white rounded-xl shadow-md p-6">
-            <div className="grid grid-cols-1 gap-6">
-              {/* Title */}
-              <div>
-                <label htmlFor="title" className="block text-sm font-medium text-orion-darkGray mb-1">
-                  Paper Title <span className="text-red-500">*</span>
-                </label>
-                <input
-                  id="title"
-                  type="text"
-                  value={title}
-                  onChange={(e) => setTitle(e.target.value)}
-                  className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-orion-darkGray focus:border-transparent"
-                  placeholder="Enter the title of your paper"
-                  tabIndex="0"
-                />
-              </div>
-              
-              {/* Abstract */}
-              <div>
-                <label htmlFor="abstract" className="block text-sm font-medium text-orion-darkGray mb-1">
-                  Abstract <span className="text-red-500">*</span>
-                </label>
-                <textarea
-                  id="abstract"
-                  value={abstract}
-                  onChange={(e) => setAbstract(e.target.value)}
-                  rows="5"
-                  className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-orion-darkGray focus:border-transparent"
-                  placeholder="Provide a brief summary of your research paper"
-                  tabIndex="0"
-                ></textarea>
-                <p className="mt-1 text-sm text-gray-500">
-                  {abstract.length}/500 characters (max)
-                </p>
-              </div>
-              
-              {/* Team Members */}
-              <div>
-                <label htmlFor="teamMembers" className="block text-sm font-medium text-orion-darkGray mb-1">
-                  Co-Authors / Team Members
-                </label>
-                <input
-                  id="teamMembers"
-                  type="text"
-                  value={teamMembers}
-                  onChange={(e) => setTeamMembers(e.target.value)}
-                  className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-orion-darkGray focus:border-transparent"
-                  placeholder="Enter names of co-authors separated by commas"
-                  tabIndex="0"
-                />
-                <p className="mt-1 text-sm text-gray-500">
-                  Enter names of all contributors, separated by commas
-                </p>
-              </div>
-              
-              {/* Research Field */}
-              <div>
-                <label htmlFor="researchField" className="block text-sm font-medium text-orion-darkGray mb-1">
-                  Research Field <span className="text-red-500">*</span>
-                </label>
-                <select
-                  id="researchField"
-                  value={researchField}
-                  onChange={(e) => setResearchField(e.target.value)}
-                  className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-orion-darkGray focus:border-transparent"
-                  tabIndex="0"
-                >
-                  <option value="">Select a research field</option>
-                  {researchFields.map((field) => (
-                    <option key={field} value={field}>
-                      {field}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              
-              {/* File Upload */}
-              <div>
-                <label className="block text-sm font-medium text-orion-darkGray mb-1">
-                  Upload Paper (PDF only) <span className="text-red-500">*</span>
-                </label>
-                <div className="mt-1 flex justify-center px-6 pt-5 pb-6 border-2 border-gray-300 border-dashed rounded-lg">
-                  <div className="space-y-1 text-center">
-                    <svg
-                      className="mx-auto h-12 w-12 text-gray-400"
-                      stroke="currentColor"
-                      fill="none"
-                      viewBox="0 0 48 48"
-                      aria-hidden="true"
-                    >
-                      <path
-                        d="M28 8H12a4 4 0 00-4 4v20m32-12v8m0 0v8a4 4 0 01-4 4H12a4 4 0 01-4-4v-4m32-4l-3.172-3.172a4 4 0 00-5.656 0L28 28M8 32l9.172-9.172a4 4 0 015.656 0L28 28m0 0l4 4m4-24h8m-4-4v8m-12 4h.02"
-                        strokeWidth={2}
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      />
-                    </svg>
-                    <div className="flex text-sm text-gray-600">
-                      <label
-                        htmlFor="file-upload"
-                        className="relative cursor-pointer bg-white rounded-md font-medium text-orion-darkGray hover:text-orion-mediumGray focus-within:outline-none"
-                      >
-                        <span>Upload a file</span>
-                        <input
-                          id="file-upload"
-                          name="file-upload"
-                          type="file"
-                          accept=".pdf"
-                          className="sr-only"
-                          onChange={handleFileChange}
-                          ref={fileInputRef}
-                          tabIndex="0"
-                        />
-                      </label>
-                      <p className="pl-1">or drag and drop</p>
-                    </div>
-                    <p className="text-xs text-gray-500">PDF up to 10MB</p>
-                    
-                    {file && (
-                      <div className="mt-2 flex items-center justify-between bg-gray-50 p-2 rounded">
-                        <div className="flex items-center">
-                          <svg className="w-6 h-6 text-orion-darkGray" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
-                          </svg>
-                          <div className="ml-2">
-                            <p className="text-sm font-medium text-orion-darkGray">{fileName}</p>
-                            <p className="text-xs text-gray-500">{formatFileSize(fileSize)}</p>
-                          </div>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setFile(null);
-                            setFileName('');
-                            setFileSize(0);
-                            if (fileInputRef.current) fileInputRef.current.value = '';
-                          }}
-                          className="text-gray-400 hover:text-gray-500"
-                          tabIndex="0"
-                          aria-label="Remove file"
-                        >
-                          <svg className="h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                          </svg>
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
+          <form onSubmit={handleSubmit} className="space-y-6">
+            {/* Title */}
+            <div>
+              <label htmlFor="title" className="block text-sm font-medium text-gray-700">
+                Paper Title <span className="text-red-500">*</span>
+              </label>
+              <input
+                type="text"
+                id="title"
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-orion-primary focus:border-orion-primary"
+                placeholder="Enter the title of your research paper"
+                required
+              />
             </div>
             
-            <div className="mt-8 flex justify-end">
+            {/* Abstract */}
+            <div>
+              <label htmlFor="abstract" className="block text-sm font-medium text-gray-700">
+                Abstract <span className="text-red-500">*</span>
+              </label>
+              <textarea
+                id="abstract"
+                value={abstract}
+                onChange={(e) => setAbstract(e.target.value)}
+                rows={5}
+                className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-orion-primary focus:border-orion-primary"
+                placeholder="Enter a brief summary of your research"
+                required
+              />
+            </div>
+            
+            {/* Team Members */}
+            <div>
+              <label htmlFor="teamMembers" className="block text-sm font-medium text-gray-700">
+                Team Members (Optional)
+              </label>
+              <input
+                type="text"
+                id="teamMembers"
+                value={teamMembers}
+                onChange={(e) => setTeamMembers(e.target.value)}
+                className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-orion-primary focus:border-orion-primary"
+                placeholder="Enter names of co-authors or team members"
+              />
+              <p className="mt-1 text-xs text-gray-500">
+                Separate names with commas
+              </p>
+            </div>
+            
+            {/* Research Field */}
+            <div>
+              <label htmlFor="researchField" className="block text-sm font-medium text-gray-700">
+                Research Field <span className="text-red-500">*</span>
+              </label>
+              <select
+                id="researchField"
+                value={researchField}
+                onChange={(e) => setResearchField(e.target.value)}
+                className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-orion-primary focus:border-orion-primary"
+                required
+              >
+                <option value="">Select Research Field</option>
+                {researchFields.map((field) => (
+                  <option key={field} value={field}>{field}</option>
+                ))}
+              </select>
+            </div>
+            
+            {/* File Upload */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Paper File (PDF) <span className="text-red-500">*</span>
+              </label>
+              
+              <IPFSFileUploader
+                onFileUploaded={handleFileUploaded}
+                onProgress={setUploadProgress}
+                acceptedFileTypes="application/pdf"
+                maxSizeMB={10}
+                metadataExtractor={(file) => ({
+                  title,
+                  abstract: abstract.substring(0, 100) + '...',
+                  researchField,
+                  authorUid: currentUser.uid,
+                  authorEmail: currentUser.email,
+                  teamMembers: teamMembers || 'Solo author',
+                  submissionDate: new Date().toISOString()
+                })}
+              />
+            </div>
+            
+            {/* Submit Button */}
+            <div className="flex justify-end">
               <button
                 type="submit"
-                className="inline-flex items-center px-6 py-3 border border-transparent rounded-md shadow-sm text-base font-medium text-white bg-orion-darkGray hover:bg-orion-mediumGray focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-orion-darkGray"
-                tabIndex="0"
-                aria-label="Continue to stake and submit"
+                className="inline-flex justify-center py-2 px-4 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-orion-primary hover:bg-orion-primaryDark focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-orion-primary"
               >
-                Continue to Stake & Submit
-                <svg className="ml-2 -mr-1 h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 5l7 7m0 0l-7 7m7-7H3" />
-                </svg>
+                Continue to Review
               </button>
             </div>
           </form>
         )}
         
-        {/* Step 2: Review & Stake */}
+        {/* Step 2: Review and Stake */}
         {step === 2 && (
-          <div className="bg-white rounded-xl shadow-md p-6">
-            <h2 className="text-xl font-bold text-orion-darkGray mb-4">
-              Review and Submit
-            </h2>
-            
-            <div className="grid grid-cols-1 gap-6 mb-8">
-              {/* Paper summary */}
-              <div className="bg-gray-50 rounded-lg p-4">
-                <h3 className="font-medium text-orion-darkGray mb-2">Paper Details</h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <p className="text-sm text-gray-500">Title</p>
-                    <p className="font-medium text-orion-darkGray">{title}</p>
-                  </div>
-                  <div>
-                    <p className="text-sm text-gray-500">Research Field</p>
-                    <p className="font-medium text-orion-darkGray">{researchField}</p>
-                  </div>
-                  <div>
-                    <p className="text-sm text-gray-500">Authors</p>
-                    <p className="font-medium text-orion-darkGray">
-                      {currentUser?.email}
-                      {teamMembers && `, ${teamMembers}`}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-sm text-gray-500">File</p>
-                    <p className="font-medium text-orion-darkGray">{fileName} ({formatFileSize(fileSize)})</p>
-                  </div>
-                </div>
-                <div className="mt-4">
-                  <p className="text-sm text-gray-500">Abstract</p>
-                  <p className="text-orion-darkGray">{abstract}</p>
-                </div>
+          <div className="space-y-6">
+            <div className="bg-white shadow overflow-hidden sm:rounded-lg">
+              <div className="px-4 py-5 sm:px-6">
+                <h3 className="text-lg leading-6 font-medium text-gray-900">
+                  Paper Submission Review
+                </h3>
+                <p className="mt-1 max-w-2xl text-sm text-gray-500">
+                  Please review the details before finalizing your submission
+                </p>
               </div>
               
-              {/* Stake information */}
-              <div className="border border-gray-200 rounded-lg p-4">
-                <h3 className="font-medium text-orion-darkGray mb-4">Staking Information</h3>
-                <div className="flex items-center justify-between p-3 bg-blue-50 rounded-lg mb-4">
-                  <div className="flex items-center">
-                    <svg className="w-5 h-5 text-blue-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                    </svg>
-                    <span className="ml-2 text-sm text-blue-800">
-                      By staking, you're confirming that this is your original work. Stake will be returned after successful verification.
-                    </span>
+              <div className="border-t border-gray-200">
+                <dl>
+                  <div className="bg-gray-50 px-4 py-5 sm:grid sm:grid-cols-3 sm:gap-4 sm:px-6">
+                    <dt className="text-sm font-medium text-gray-500">Title</dt>
+                    <dd className="mt-1 text-sm text-gray-900 sm:mt-0 sm:col-span-2">{title}</dd>
                   </div>
+                  
+                  <div className="bg-white px-4 py-5 sm:grid sm:grid-cols-3 sm:gap-4 sm:px-6">
+                    <dt className="text-sm font-medium text-gray-500">Research Field</dt>
+                    <dd className="mt-1 text-sm text-gray-900 sm:mt-0 sm:col-span-2">{researchField}</dd>
+                  </div>
+                  
+                  <div className="bg-gray-50 px-4 py-5 sm:grid sm:grid-cols-3 sm:gap-4 sm:px-6">
+                    <dt className="text-sm font-medium text-gray-500">Abstract</dt>
+                    <dd className="mt-1 text-sm text-gray-900 sm:mt-0 sm:col-span-2">
+                      {abstract}
+                    </dd>
+                  </div>
+                  
+                  <div className="bg-white px-4 py-5 sm:grid sm:grid-cols-3 sm:gap-4 sm:px-6">
+                    <dt className="text-sm font-medium text-gray-500">Team Members</dt>
+                    <dd className="mt-1 text-sm text-gray-900 sm:mt-0 sm:col-span-2">
+                      {teamMembers || 'Solo Author'}
+                    </dd>
+                  </div>
+                  
+                  <div className="bg-gray-50 px-4 py-5 sm:grid sm:grid-cols-3 sm:gap-4 sm:px-6">
+                    <dt className="text-sm font-medium text-gray-500">File</dt>
+                    <dd className="mt-1 text-sm text-gray-900 sm:mt-0 sm:col-span-2">
+                      {fileName} ({formatFileSize(fileSize)})
+                    </dd>
+                  </div>
+                  
+                  <div className="bg-white px-4 py-5 sm:grid sm:grid-cols-3 sm:gap-4 sm:px-6">
+                    <dt className="text-sm font-medium text-gray-500">IPFS Hash</dt>
+                    <dd className="mt-1 text-sm text-gray-900 sm:mt-0 sm:col-span-2">
+                      {ipfsResult?.IpfsHash}
+                    </dd>
+                  </div>
+                  
+                  <div className="bg-gray-50 px-4 py-5 sm:grid sm:grid-cols-3 sm:gap-4 sm:px-6">
+                    <dt className="text-sm font-medium text-gray-500">Required Stake</dt>
+                    <dd className="mt-1 text-sm text-gray-900 sm:mt-0 sm:col-span-2">
+                      {stakeAmount} ETH
+                    </dd>
+                  </div>
+                </dl>
+              </div>
+            </div>
+            
+            <div className="bg-yellow-50 border-l-4 border-yellow-400 p-4">
+              <div className="flex">
+                <div className="flex-shrink-0">
+                  <svg className="h-5 w-5 text-yellow-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                    <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                  </svg>
                 </div>
-                
-                <div className="flex justify-between items-center py-3 border-b border-gray-200">
-                  <span className="font-medium text-orion-darkGray">Required Stake Amount:</span>
-                  <div className="flex items-center">
-                    <svg className="w-5 h-5 text-gray-600 mr-1" viewBox="0 0 33 53" fill="none" xmlns="http://www.w3.org/2000/svg">
-                      <path d="M16.3576 0L16 1.11273V36.3028L16.3576 36.6611L32.2976 27.5559L16.3576 0Z" fill="#343434"/>
-                      <path d="M16.3578 0L0.417847 27.5559L16.3578 36.6611V19.6374V0Z" fill="#8C8C8C"/>
-                      <path d="M16.3575 39.7374L16.1567 39.9827V52.4515L16.3575 53L32.3066 30.6377L16.3575 39.7374Z" fill="#3C3C3B"/>
-                      <path d="M16.3578 53.0001V39.7375L0.417847 30.6378L16.3578 53.0001Z" fill="#8C8C8C"/>
-                      <path d="M16.3575 36.6611L32.2973 27.556L16.3575 19.6375V36.6611Z" fill="#141414"/>
-                      <path d="M0.417847 27.556L16.3576 36.6611V19.6375L0.417847 27.556Z" fill="#393939"/>
-                    </svg>
-                    <span className="text-xl font-bold text-orion-darkGray">{stakeAmount} ETH</span>
-                  </div>
-                </div>
-                
-                <div className="flex justify-between items-center py-3 border-b border-gray-200">
-                  <span className="font-medium text-orion-darkGray">Gas Fee (estimated):</span>
-                  <div className="flex items-center">
-                    <svg className="w-5 h-5 text-gray-600 mr-1" viewBox="0 0 33 53" fill="none" xmlns="http://www.w3.org/2000/svg">
-                      <path d="M16.3576 0L16 1.11273V36.3028L16.3576 36.6611L32.2976 27.5559L16.3576 0Z" fill="#343434"/>
-                      <path d="M16.3578 0L0.417847 27.5559L16.3578 36.6611V19.6374V0Z" fill="#8C8C8C"/>
-                      <path d="M16.3575 39.7374L16.1567 39.9827V52.4515L16.3575 53L32.3066 30.6377L16.3575 39.7374Z" fill="#3C3C3B"/>
-                      <path d="M16.3578 53.0001V39.7375L0.417847 30.6378L16.3578 53.0001Z" fill="#8C8C8C"/>
-                      <path d="M16.3575 36.6611L32.2973 27.556L16.3575 19.6375V36.6611Z" fill="#141414"/>
-                      <path d="M0.417847 27.556L16.3576 36.6611V19.6375L0.417847 27.556Z" fill="#393939"/>
-                    </svg>
-                    <span className="text-orion-darkGray">~0.002 ETH</span>
-                  </div>
-                </div>
-                
-                <div className="flex justify-between items-center py-3">
-                  <span className="font-medium text-orion-darkGray">Total:</span>
-                  <div className="flex items-center">
-                    <svg className="w-5 h-5 text-gray-600 mr-1" viewBox="0 0 33 53" fill="none" xmlns="http://www.w3.org/2000/svg">
-                      <path d="M16.3576 0L16 1.11273V36.3028L16.3576 36.6611L32.2976 27.5559L16.3576 0Z" fill="#343434"/>
-                      <path d="M16.3578 0L0.417847 27.5559L16.3578 36.6611V19.6374V0Z" fill="#8C8C8C"/>
-                      <path d="M16.3575 39.7374L16.1567 39.9827V52.4515L16.3575 53L32.3066 30.6377L16.3575 39.7374Z" fill="#3C3C3B"/>
-                      <path d="M16.3578 53.0001V39.7375L0.417847 30.6378L16.3578 53.0001Z" fill="#8C8C8C"/>
-                      <path d="M16.3575 36.6611L32.2973 27.556L16.3575 19.6375V36.6611Z" fill="#141414"/>
-                      <path d="M0.417847 27.556L16.3576 36.6611V19.6375L0.417847 27.556Z" fill="#393939"/>
-                    </svg>
-                    <span className="text-xl font-bold text-orion-darkGray">~0.052 ETH</span>
-                  </div>
+                <div className="ml-3">
+                  <p className="text-sm text-yellow-700">
+                    Submitting this paper requires a stake of {stakeAmount} ETH. This stake will be returned to you if your paper passes the review process.
+                  </p>
                 </div>
               </div>
             </div>
             
-            {/* Submission UI */}
-            {isSubmitting ? (
-              <div className="bg-gray-50 rounded-lg p-6">
-                <h3 className="font-medium text-orion-darkGray text-center mb-4">
-                  Submitting your paper...
-                </h3>
-                <div className="mb-4">
-                  <div className="mb-2 flex justify-between">
-                    <span className="text-sm font-medium text-orion-darkGray">
-                      Uploading to IPFS
-                    </span>
-                    <span className="text-sm font-medium text-orion-darkGray">
-                      {uploadProgress}%
-                    </span>
-                  </div>
-                  <div className="w-full bg-gray-200 rounded-full h-2.5">
-                    <div 
-                      className="bg-gradient-to-r from-orion-darkGray to-orion-mediumGray h-2.5 rounded-full" 
-                      style={{ width: `${uploadProgress}%` }}
-                    ></div>
-                  </div>
-                </div>
-                <p className="text-sm text-center text-gray-500">
-                  Please don't close this page. This process may take a few minutes.
-                </p>
-              </div>
-            ) : (
-              <div className="flex justify-between">
-                <button
-                  type="button"
-                  onClick={() => setStep(1)}
-                  className="inline-flex items-center px-4 py-2 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-orion-darkGray bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-orion-darkGray"
-                  tabIndex="0"
-                  aria-label="Back to edit paper details"
-                >
-                  <svg className="mr-2 -ml-1 h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
-                  </svg>
-                  Back
-                </button>
-                <button
-                  type="button"
-                  onClick={handleStakeAndSubmit}
-                  className="inline-flex items-center px-6 py-3 border border-transparent rounded-md shadow-sm text-base font-medium text-white bg-orion-darkGray hover:bg-orion-mediumGray focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-orion-darkGray"
-                  tabIndex="0"
-                  aria-label="Confirm submission and stake funds"
-                >
-                  Submit & Stake Funds
-                  <svg className="ml-2 -mr-1 h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-                  </svg>
-                </button>
-              </div>
-            )}
+            <div className="flex justify-between">
+              <button
+                type="button"
+                onClick={() => setStep(1)}
+                className="inline-flex justify-center py-2 px-4 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-orion-primary"
+              >
+                Back to Edit
+              </button>
+              
+              <button
+                type="button"
+                onClick={handleStakeAndSubmit}
+                disabled={isSubmitting || !isWalletConnected()}
+                className={`inline-flex justify-center py-2 px-4 border border-transparent shadow-sm text-sm font-medium rounded-md text-white ${
+                  isWalletConnected() 
+                    ? 'bg-orion-primary hover:bg-orion-primaryDark' 
+                    : 'bg-gray-400 cursor-not-allowed'
+                } focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-orion-primary`}
+              >
+                {isSubmitting ? (
+                  <span className="flex items-center">
+                    <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    Processing...
+                  </span>
+                ) : 'Stake & Submit Paper'}
+              </button>
+            </div>
           </div>
         )}
       </div>
