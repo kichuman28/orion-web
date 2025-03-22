@@ -102,6 +102,54 @@
   }
 }
 
+@keyframes zoomIn {
+  from {
+    opacity: 0;
+    transform: scale3d(0.3, 0.3, 0.3);
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+@keyframes rotate {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes loadingBar {
+  0% {
+    width: 0%;
+  }
+  100% {
+    width: 100%;
+  }
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.85;
+    transform: scale(1.05);
+  }
+}
+
+@keyframes drawCircle {
+  0% {
+    stroke-dashoffset: 283;
+  }
+  100% {
+    stroke-dashoffset: 0;
+  }
+}
+
 .animate-float {
   animation: float 8s ease-in-out infinite;
 }
@@ -117,6 +165,24 @@
 .animate-shimmer {
   animation: shimmer 3s linear infinite;
   background-size: 200% 100%;
+}
+
+.animate-zoomIn {
+  animation: zoomIn 1s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+}
+
+.animate-pulse {
+  animation: pulse 2s ease-in-out infinite;
+}
+
+.animate-rotate {
+  animation: rotate 20s linear infinite;
+}
+
+.animate-drawCircle {
+  stroke-dasharray: 283;
+  stroke-dashoffset: 283;
+  animation: drawCircle 2s ease forwards;
 }
 
 /* Gradient Text Helpers */
