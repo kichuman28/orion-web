@@ -233,6 +233,38 @@ const UserDashboard = () => {
         </div>
       )}
       
+      {/* ScholarDAO Actions Section */}
+      <div className="bg-white shadow rounded-lg overflow-hidden mb-8">
+        <div className="px-6 py-4 border-b border-gray-200">
+          <h2 className="text-lg font-medium text-gray-900">ScholarDAO Actions</h2>
+        </div>
+        <div className="p-6 grid grid-cols-1 md:grid-cols-2 gap-4">
+          <Link to="/paper-approvals" className="group flex items-center p-4 bg-orion-lightBg rounded-lg hover:bg-orion-darkGray/10 transition-colors">
+            <div className="flex-shrink-0 w-12 h-12 flex items-center justify-center bg-orion-darkGray/10 rounded-lg group-hover:bg-orion-darkGray/20">
+              <svg className="w-6 h-6 text-orion-darkGray" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+            </div>
+            <div className="ml-4">
+              <h3 className="text-lg font-medium text-orion-darkGray">Paper Approvals</h3>
+              <p className="text-sm text-orion-gray">Review and vote on submitted research papers</p>
+            </div>
+          </Link>
+          
+          <Link to="/wallet-connection" className="group flex items-center p-4 bg-orion-lightBg rounded-lg hover:bg-orion-darkGray/10 transition-colors">
+            <div className="flex-shrink-0 w-12 h-12 flex items-center justify-center bg-orion-darkGray/10 rounded-lg group-hover:bg-orion-darkGray/20">
+              <svg className="w-6 h-6 text-orion-darkGray" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2z" />
+              </svg>
+            </div>
+            <div className="ml-4">
+              <h3 className="text-lg font-medium text-orion-darkGray">Wallet Connection</h3>
+              <p className="text-sm text-orion-gray">Connect your crypto wallet to interact with the blockchain</p>
+            </div>
+          </Link>
+        </div>
+      </div>
+      
       {/* Main Grid Layout */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         {/* Recent Papers */}

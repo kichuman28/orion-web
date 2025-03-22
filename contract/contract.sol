@@ -348,7 +348,7 @@ function getPaperRevisionHistory(uint256 _paperId) external view returns (uint25
         currentId = papers[currentId].previousVersion;
     }
     history[0] = currentId; // Add the original paper
-    
+        
     return history;
 }
 }

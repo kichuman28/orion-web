@@ -796,7 +796,7 @@ const WalletConnection = () => {
 ];
   
   // Contract address - update with the actual contract address
-  const contractAddress = '0x56bed8Fb1C2081057cbcF72b3f9828E5799a955C'; // Example contract address for EDU chain
+  const contractAddress = '0x41fC6ddc097bCf6685446B0803d45755b344Ff1E'; // Example contract address for EDU chain
 
   // Check if MetaMask is installed
   const isMetaMaskInstalled = () => {
