@@ -553,10 +553,10 @@ const SubmitPaper = () => {
                 </div>
                 
                 {/* Submit Button */}
-                <div className="flex justify-end">
+                <div className="flex justify-end mt-16">
                   <button
                     type="submit"
-                    className="inline-flex justify-center py-2 px-4 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-orion-primary hover:bg-orion-primaryDark focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-orion-primary"
+                    className="inline-flex justify-center py-2 px-4 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-blue-700 hover:bg-blue-800 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-700"
                   >
                     Continue to Review
                   </button>
@@ -662,7 +662,7 @@ const SubmitPaper = () => {
                 Back to Edit
               </button>
               
-              <div className="flex space-x-2">
+              <div className="flex space-x-4">
                 {/* Debug button on Review page too */}
                 <button
                   type="button"
@@ -679,7 +679,7 @@ const SubmitPaper = () => {
                   className={`inline-flex items-center px-6 py-3 border border-transparent text-base font-medium rounded-md shadow-sm text-white ${
                     isSubmitting || !isWalletConnected() 
                       ? 'bg-gray-400 cursor-not-allowed' 
-                      : 'bg-orion-primary hover:bg-orion-primaryDark focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-orion-primary'
+                      : 'bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500'
                   }`}
                 >
                   {isSubmitting ? (
