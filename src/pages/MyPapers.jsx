@@ -48,6 +48,7 @@ const MyPapers = () => {
         const q = query(
           papersRef, 
           where('authorUid', '==', currentUser.uid),
+          orderBy('status', 'asc'), // Sort by status first
           orderBy('submissionDate', 'desc')
         );
         
@@ -84,7 +85,30 @@ const MyPapers = () => {
           });
         });
         
-        setPapers(fetchedPapers);
+        // Sort papers by status priority: approved, verified, pending, rejected
+        const sortedPapers = fetchedPapers.sort((a, b) => {
+          // Define status priority
+          const statusPriority = {
+            'approved': 1,
+            'verified': 2,
+            'pending': 3,
+            'rejected': 4
+          };
+          
+          // Get priority or default to lowest priority (5)
+          const priorityA = statusPriority[a.status] || 5;
+          const priorityB = statusPriority[b.status] || 5;
+          
+          // Sort by priority first, then by date if priority is the same
+          if (priorityA !== priorityB) {
+            return priorityA - priorityB;
+          }
+          
+          // If same status, sort by date (newest first)
+          return new Date(b.submittedAt) - new Date(a.submittedAt);
+        });
+        
+        setPapers(sortedPapers);
         
         // If paperId is provided, fetch the selected paper directly from Firestore
         if (paperId) {
@@ -325,17 +349,19 @@ const MyPapers = () => {
                       className="border rounded-lg shadow-sm hover:shadow-md transition-shadow cursor-pointer overflow-hidden bg-white"
                       onClick={() => handleSelectPaper(paper)}
                     >
+                      {/* Status ribbon at top of card */}
+                      <div className={`w-full py-1 px-3 text-xs font-medium text-center text-white ${
+                        paper.status === 'approved' ? 'bg-green-600' : 
+                        paper.status === 'pending' ? 'bg-yellow-500' : 
+                        paper.status === 'verified' ? 'bg-blue-600' : 
+                        'bg-red-600'
+                      }`}>
+                        Status: {paper.status.charAt(0).toUpperCase() + paper.status.slice(1)}
+                      </div>
+                      
                       <div className="p-6">
                         <div className="flex justify-between items-start mb-3">
                           <h2 className="text-xl font-semibold text-gray-900 line-clamp-2">{paper.title}</h2>
-                          <span className={`px-2 py-1 text-xs rounded-full font-medium ${
-                            paper.status === 'approved' ? 'bg-green-100 text-green-800' : 
-                            paper.status === 'pending' ? 'bg-yellow-100 text-yellow-800' : 
-                            paper.status === 'verified' ? 'bg-blue-100 text-blue-800' : 
-                            'bg-red-100 text-red-800'
-                          }`}>
-                            {paper.status.charAt(0).toUpperCase() + paper.status.slice(1)}
-                          </span>
                         </div>
                         
                         <p className="text-gray-600 text-sm line-clamp-3 mb-4">{paper.abstract}</p>
@@ -359,7 +385,7 @@ const MyPapers = () => {
                                 <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-blue-500" viewBox="0 0 20 20" fill="currentColor">
                                   <path fillRule="evenodd" d="M2.166 4.999A11.954 11.954 0 0010 1.944 11.954 11.954 0 0017.834 5c.11.65.166 1.32.166 2.001 0 5.225-3.34 9.67-8 11.317C5.34 16.67 2 12.225 2 7c0-.682.057-1.35.166-2.001zm11.541 3.708a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
                                 </svg>
-                                <span>Verified</span>
+                                <span>Blockchain</span>
                             </span>
                           )}
                             
@@ -377,25 +403,27 @@ const MyPapers = () => {
                 <div className="lg:col-span-2">
                   <div className="bg-white rounded-lg shadow-sm p-6 mb-6">
                     <div className="flex justify-between items-start mb-6">
-                      <button 
-                        onClick={handleBackToList}
-                        className="inline-flex items-center text-primary hover:text-primary-dark"
-                      >
-                        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-1" viewBox="0 0 20 20" fill="currentColor">
-                          <path fillRule="evenodd" d="M12.707 5.293a1 1 0 010 1.414L9.414 10l3.293 3.293a1 1 0 01-1.414 1.414l-4-4a1 1 0 010-1.414l4-4a1 1 0 011.414 0z" clipRule="evenodd" />
-                        </svg>
-                        Back to My Papers
-                      </button>
-                      
-                      <span className={`px-3 py-1 text-sm rounded-full font-medium ${
-                        selectedPaper.status === 'approved' ? 'bg-green-100 text-green-800' : 
-                        selectedPaper.status === 'pending' ? 'bg-yellow-100 text-yellow-800' : 
-                        selectedPaper.status === 'verified' ? 'bg-blue-100 text-blue-800' : 
-                        'bg-red-100 text-red-800'
-                      }`}>
-                        {selectedPaper.status.charAt(0).toUpperCase() + selectedPaper.status.slice(1)}
-                            </span>
-                        </div>
+                      <div className="inline-flex items-center">
+                        <button 
+                          onClick={handleBackToList}
+                          className="inline-flex items-center text-primary hover:text-primary-dark"
+                        >
+                          <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-1" viewBox="0 0 20 20" fill="currentColor">
+                            <path fillRule="evenodd" d="M12.707 5.293a1 1 0 010 1.414L9.414 10l3.293 3.293a1 1 0 01-1.414 1.414l-4-4a1 1 0 010-1.414l4-4a1 1 0 011.414 0z" clipRule="evenodd" />
+                          </svg>
+                          Back to My Papers
+                        </button>
+                        
+                        <span className={`px-3 py-1 text-sm rounded-full font-medium ${
+                          selectedPaper.status === 'approved' ? 'bg-green-100 text-green-800' : 
+                          selectedPaper.status === 'pending' ? 'bg-yellow-100 text-yellow-800' : 
+                          selectedPaper.status === 'verified' ? 'bg-blue-100 text-blue-800' : 
+                          'bg-red-100 text-red-800'
+                        }`}>
+                          {selectedPaper.status.charAt(0).toUpperCase() + selectedPaper.status.slice(1)}
+                        </span>
+                      </div>
+                    </div>
                     
                     <h1 className="text-2xl font-bold text-gray-900 mb-4">{selectedPaper.title}</h1>
                     
@@ -485,7 +513,7 @@ const MyPapers = () => {
                               <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
                                 <path fillRule="evenodd" d="M2.166 4.999A11.954 11.954 0 0010 1.944 11.954 11.954 0 0017.834 5c.11.65.166 1.32.166 2.001 0 5.225-3.34 9.67-8 11.317C5.34 16.67 2 12.225 2 7c0-.682.057-1.35.166-2.001zm11.541 3.708a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
                             </svg>
-                              <span>Verified on Blockchain</span>
+                              <span>Recorded on Blockchain</span>
                           </div>
                             <div className="flex items-center space-x-4">
                               <span className="text-sm text-gray-500">

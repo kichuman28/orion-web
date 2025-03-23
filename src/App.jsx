@@ -15,6 +15,7 @@ import MyPapers from './pages/MyPapers';
 import Profile from './pages/Profile';
 import WalletConnection from './pages/WalletConnection';
 import PaperApprovals from './pages/PaperApprovals';
+import MyReviews from './pages/MyReviews';
 import ProtectedRoute from './components/ProtectedRoute';
 import RoleBasedRoute from './components/RoleBasedRoute';
 import CommitteePage from './pages/CommitteePage';
@@ -56,6 +57,7 @@ function App() {
               <Route element={<RoleBasedRoute allowedRoles={['committee', 'admin']} />}>
                 <Route path="/committee-dashboard" element={<CommitteeDashboard />} />
                 <Route path="/paper-approvals" element={<PaperApprovals />} />
+                <Route path="/my-reviews" element={<MyReviews />} />
               </Route>
               
               {/* Admin routes */}

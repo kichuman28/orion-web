@@ -4,7 +4,7 @@ import DashboardLayout from '../components/DashboardLayout';
 import { useAuth } from '../contexts/AuthContext';
 import { useNavigate, Link } from 'react-router-dom';
 import { db } from '../config/firebase';
-import { doc, setDoc, Timestamp, addDoc, collection, serverTimestamp, query, where, getDocs } from 'firebase/firestore';
+import { doc, setDoc, Timestamp, addDoc, collection, serverTimestamp, query, where, getDocs, getDoc } from 'firebase/firestore';
 
 const PaperApprovals = () => {
   const navigate = useNavigate();
@@ -1012,22 +1012,75 @@ const PaperApprovals = () => {
           // Get min required votes to display in UI
           const minVotes = await contract.minRequiredVotes();
           
-          fetchedPapers.push({
-            id: i,
-            author: details.author,
-            title: details.title,
-            price: priceInEth,
-            teamMembers: details.teamMembers,
-            researchField: details.researchField,
-            isApproved: details.isApproved,
-            isRevision: details.isRevision,
-            previousVersion: details.previousVersion.toString(),
-            isDecided: status.isDecided,
-            approvalCount: Number(status.approvals),
-            rejectionCount: Number(status.rejections),
-            hasVoted: hasVoted,
-            minRequiredVotes: minVotes ? Number(minVotes.toString()) : 3 // Default to 3 if not available
-          });
+          // Try to get additional metadata from Firestore
+          let firestoreData = null;
+          try {
+            // Query Firestore for paper with matching hash or transaction data
+            const papersRef = collection(db, 'papers');
+            const contentHash = details.contentHash || ""; // This might be the IPFS hash
+
+            // Try to find the paper in Firestore by hash or author address
+            const q = query(
+              papersRef,
+              where('ipfsHash', '==', contentHash)
+            );
+            
+            const querySnapshot = await getDocs(q);
+            
+            if (!querySnapshot.empty) {
+              firestoreData = querySnapshot.docs[0].data();
+            } else {
+              // Try alternate query with author address if needed
+              const altQuery = query(
+                papersRef,
+                where('authorWallet', '==', details.author.toLowerCase())
+              );
+              
+              const altQuerySnapshot = await getDocs(altQuery);
+              
+              if (!altQuerySnapshot.empty) {
+                // Find the most likely match if multiple papers by same author
+                firestoreData = altQuerySnapshot.docs.find(doc => 
+                  doc.data().title === details.title || 
+                  doc.data().teamMembers.includes(details.teamMembers)
+                )?.data() || altQuerySnapshot.docs[0].data();
+              }
+            }
+          } catch (firestoreError) {
+            console.error('Error fetching paper metadata from Firestore:', firestoreError);
+            // Continue without Firestore data
+          }
+          
+          // Only add papers that the user hasn't voted on yet
+          if (!hasVoted) {
+            fetchedPapers.push({
+              id: i,
+              author: details.author,
+              title: details.title,
+              price: priceInEth,
+              teamMembers: details.teamMembers,
+              researchField: details.researchField,
+              isApproved: details.isApproved,
+              isRevision: details.isRevision,
+              previousVersion: details.previousVersion.toString(),
+              isDecided: status.isDecided,
+              approvalCount: Number(status.approvals),
+              rejectionCount: Number(status.rejections),
+              hasVoted: hasVoted,
+              minRequiredVotes: minVotes ? Number(minVotes.toString()) : 3, // Default to 3 if not available
+              
+              // Additional data from Firestore if available
+              abstract: firestoreData?.abstract || '',
+              fileName: firestoreData?.fileName || '',
+              fileSize: firestoreData?.fileSize || 0,
+              fileUrl: firestoreData?.fileUrl || '',
+              ipfsHash: firestoreData?.ipfsHash || contentHash,
+              submissionDate: firestoreData?.submissionDate?.toDate?.() || null,
+              firestoreId: firestoreData?.id || null,
+              authorName: firestoreData?.authorName || 'Anonymous Researcher',
+              authorEmail: firestoreData?.authorEmail || ''
+            });
+          }
         } catch (error) {
           console.error(`Error fetching paper ${i}:`, error);
         }
@@ -1055,6 +1108,7 @@ const PaperApprovals = () => {
 
   // Open voting modal for a paper
   const handleOpenVoteModal = (paperId) => {
+    console.log("Opening vote modal for paper ID:", paperId);
     setVotingPaperId(paperId);
     setVoteComment('');
     setVoteApproval(true);
@@ -1105,15 +1159,17 @@ const PaperApprovals = () => {
       const receipt = await tx.wait();
       console.log('Vote transaction receipt:', receipt);
       
-      // Close modal and refresh papers
-      setSuccessMessage(`Vote submitted successfully for paper #${votingPaperId}! Transaction hash: ${receipt.hash.substring(0, 10)}...`);
+      // Close modal
       setVotingPaperId(null);
-      await fetchPapers();
       
-      // Clear success message after 5 seconds
+      // Display success message and navigate to My Reviews page
+      setSuccessMessage(`Vote submitted successfully for paper #${votingPaperId}! Redirecting you to My Reviews...`);
+      
+      // Clear success message after 3 seconds and navigate
       setTimeout(() => {
         setSuccessMessage('');
-      }, 7000);
+        navigate('/my-reviews');
+      }, 3000);
     } catch (error) {
       console.error('Error submitting vote:', error);
       
@@ -1211,7 +1267,7 @@ const PaperApprovals = () => {
         ) : (
           <button
             onClick={() => setShowRequestModal(true)}
-            className="px-4 py-2 bg-orion-primary text-white rounded-md hover:bg-orion-primaryDark transition-colors"
+            className="px-4 py-2 bg-orion-darkGray text-white rounded-md hover:bg-orion-mediumGray transition-colors"
           >
             Request Membership
           </button>
@@ -1265,11 +1321,21 @@ const PaperApprovals = () => {
                   Cancel
                 </button>
                 <button
-                  className="px-4 py-2 bg-orion-primary text-white rounded-md hover:bg-orion-primaryDark disabled:opacity-50"
                   onClick={handleRequestMembership}
                   disabled={requestLoading || !requestReason.trim()}
+                  className="px-4 py-2 bg-orion-darkGray text-white rounded-md hover:bg-orion-mediumGray disabled:opacity-50"
+                  tabIndex="0"
+                  aria-label="Submit membership request"
                 >
-                  {requestLoading ? 'Submitting...' : 'Submit Request'}
+                  {requestLoading ? (
+                    <div className="flex items-center justify-center">
+                      <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                      </svg>
+                      Submitting...
+                    </div>
+                  ) : 'Submit Request'}
                 </button>
               </div>
             </>
@@ -1300,39 +1366,175 @@ const PaperApprovals = () => {
     }
   };
 
+  // Add function to open the IPFS PDF in a new tab
+  const handleViewPaper = (fileUrl) => {
+    if (!fileUrl) {
+      setError('PDF URL not available for this paper.');
+      return;
+    }
+    
+    // Open the PDF in a new tab
+    window.open(fileUrl, '_blank');
+  };
+  
+  // Format file size for display
+  const formatFileSize = (bytes) => {
+    if (!bytes || bytes === 0) return 'Unknown size';
+    const k = 1024;
+    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+  };
+  
+  // Format date for display
+  const formatDate = (date) => {
+    if (!date) return 'Unknown date';
+    
+    try {
+      if (typeof date === 'object' && date.toDate) {
+        // Handle Firestore Timestamp objects
+        date = date.toDate();
+      } else if (typeof date === 'string') {
+        // Handle ISO string dates
+        date = new Date(date);
+      }
+      
+      return date.toLocaleDateString('en-US', {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric'
+      });
+    } catch (err) {
+      console.error('Error formatting date:', err);
+      return 'Invalid date';
+    }
+  };
+
+  // Format file name from URL 
+  const formatFileName = (url) => {
+    if (!url) return 'Research Paper.pdf';
+    
+    try {
+      // Try to extract filename from URL
+      const parts = url.split('/');
+      let fileName = parts[parts.length - 1];
+      
+      // Remove any query parameters
+      fileName = fileName.split('?')[0];
+      
+      // If it's an IPFS hash with no extension, add .pdf
+      if (fileName.length > 30 && !fileName.includes('.')) {
+        return 'Research Paper.pdf';
+      }
+      
+      // If it's still very long (likely a hash), use generic name
+      if (fileName.length > 30) {
+        return 'Research Paper.pdf';
+      }
+      
+      // If no extension, add .pdf
+      if (!fileName.includes('.')) {
+        fileName += '.pdf';
+      }
+      
+      return fileName;
+    } catch (err) {
+      console.error('Error formatting file name:', err);
+      return 'Research Paper.pdf';
+    }
+  };
+
   return (
     <DashboardLayout>
-      <div className="max-w-6xl mx-auto">
-        {/* Header */}
-        <div className="flex justify-between items-center mb-8">
-          <h1 className="text-2xl font-bold text-orion-darkGray">Paper Approvals</h1>
-          <div className="flex items-center space-x-4">
-            {userRole === 'admin' && (
-              <Link
-                to="/admin/committee"
-                className="text-orion-mediumGray hover:text-orion-darkGray flex items-center"
+      <div className="p-6">
+        <div className="mb-6">
+          <nav className="flex mb-4" aria-label="Breadcrumb">
+            <ol className="inline-flex items-center space-x-1 md:space-x-3">
+              <li className="inline-flex items-center">
+                <Link to="/dashboard" className="inline-flex items-center text-sm font-medium text-orion-gray hover:text-orion-darkGray">
+                  <svg className="w-4 h-4 mr-2" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M10.707 2.293a1 1 0 00-1.414 0l-7 7a1 1 0 001.414 1.414L4 10.414V17a1 1 0 001 1h2a1 1 0 001-1v-2a1 1 0 011-1h2a1 1 0 011 1v2a1 1 0 001 1h2a1 1 0 001-1v-6.586l.293.293a1 1 0 001.414-1.414l-7-7z"></path>
+                  </svg>
+                  Dashboard
+                </Link>
+              </li>
+              <li aria-current="page">
+                <div className="flex items-center">
+                  <svg className="w-6 h-6 text-orion-gray" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg">
+                    <path fillRule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clipRule="evenodd"></path>
+                  </svg>
+                  <span className="ml-1 text-sm font-medium text-orion-darkGray md:ml-2">Paper Approvals</span>
+                </div>
+              </li>
+            </ol>
+          </nav>
+
+          <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center">
+            <div>
+              <h1 className="text-2xl font-bold text-orion-darkGray">Research Papers for Review</h1>
+              <p className="text-orion-gray mt-1">
+                Review and vote on research papers as a committee member
+              </p>
+            </div>
+            
+            <div className="mt-4 sm:mt-0 flex items-center space-x-4">
+              {userRole === 'admin' && (
+                <Link
+                  to="/admin/committee"
+                  className="text-orion-mediumGray hover:text-orion-darkGray flex items-center"
+                  tabIndex="0"
+                  aria-label="Manage ScholarDAO Committee"
+                >
+                  <svg className="w-5 h-5 mr-1" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+                  </svg>
+                  Manage Committee
+                </Link>
+              )}
+              <button
+                onClick={handleBackToDashboard}
+                className="text-orion-darkGray hover:text-orion-mediumGray flex items-center"
                 tabIndex="0"
-                aria-label="Manage ScholarDAO Committee"
+                aria-label="Return to dashboard"
               >
                 <svg className="w-5 h-5 mr-1" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
                 </svg>
-                Manage Committee
-              </Link>
-            )}
-            <button
-              onClick={handleBackToDashboard}
-              className="text-orion-darkGray hover:text-orion-mediumGray flex items-center"
-              tabIndex="0"
-              aria-label="Return to dashboard"
-            >
-              <svg className="w-5 h-5 mr-1" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
-              </svg>
-              Back to Dashboard
-            </button>
+                Back to Dashboard
+              </button>
+            </div>
           </div>
         </div>
+        
+        {error && (
+          <div className="mb-6 p-4 bg-red-50 border-l-4 border-red-400 text-red-700">
+            <div className="flex">
+              <div className="flex-shrink-0">
+                <svg className="h-5 w-5 text-red-400" viewBox="0 0 20 20" fill="currentColor">
+                  <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+                </svg>
+              </div>
+              <div className="ml-3">
+                <p className="text-sm">{error}</p>
+              </div>
+            </div>
+          </div>
+        )}
+        
+        {successMessage && (
+          <div className="mb-6 p-4 bg-green-50 border-l-4 border-green-400 text-green-700">
+            <div className="flex">
+              <div className="flex-shrink-0">
+                <svg className="h-5 w-5 text-green-400" viewBox="0 0 20 20" fill="currentColor">
+                  <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                </svg>
+              </div>
+              <div className="ml-3">
+                <p className="text-sm">{successMessage}</p>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Main Content */}
         <div className="bg-white rounded-xl shadow-md overflow-hidden">
@@ -1378,6 +1580,27 @@ const PaperApprovals = () => {
             </div>
           ) : !isMember ? (
             renderNotMemberMessage()
+          ) : hasRequestedMembership ? (
+            <div className="text-center p-8">
+              <svg className="mx-auto h-12 w-12 text-yellow-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              <h3 className="mt-2 text-lg font-medium text-gray-900">Membership Request Pending</h3>
+              <p className="mt-1 text-sm text-gray-500">
+                Your request to join the DAO is currently under review. 
+                You will be notified once your request has been approved.
+              </p>
+              <div className="mt-6">
+                <button
+                  onClick={handleBackToDashboard}
+                  className="px-4 py-2 bg-orion-darkGray text-white rounded-md hover:bg-orion-mediumGray transition-colors"
+                  tabIndex="0"
+                  aria-label="Return to dashboard"
+                >
+                  Return to Dashboard
+                </button>
+              </div>
+            </div>
           ) : (
             <div className="p-8">
               {error && (
@@ -1393,12 +1616,44 @@ const PaperApprovals = () => {
               )}
               
               {loading ? (
-                <div className="flex justify-center items-center py-12">
-                  <svg className="animate-spin h-8 w-8 text-orion-mediumGray" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                  </svg>
-                  <span className="ml-3 text-orion-gray">Loading papers...</span>
+                <div className="space-y-6">
+                  {[1, 2, 3].map((i) => (
+                    <div key={i} className="bg-white rounded-lg shadow-md overflow-hidden animate-pulse">
+                      <div className="w-full h-2 bg-gray-200"></div>
+                      <div className="p-5">
+                        <div className="flex justify-between items-start mb-4">
+                          <div className="w-3/4">
+                            <div className="h-6 bg-gray-200 rounded mb-2"></div>
+                            <div className="h-4 bg-gray-100 rounded w-1/3 mb-2"></div>
+                          </div>
+                          <div className="flex items-center">
+                            <div className="w-10 h-10 rounded-full bg-gray-200"></div>
+                            <div className="ml-2">
+                              <div className="h-4 bg-gray-200 rounded w-20 mb-1"></div>
+                              <div className="h-3 bg-gray-100 rounded w-16"></div>
+                            </div>
+                          </div>
+                        </div>
+                        
+                        <div className="mb-4">
+                          <div className="flex justify-between items-center mb-1">
+                            <div className="w-24 h-4 bg-gray-200 rounded"></div>
+                            <div className="w-16 h-3 bg-gray-100 rounded"></div>
+                          </div>
+                          <div className="h-2 bg-gray-200 rounded-full overflow-hidden">
+                            <div className="h-full bg-gray-300 w-2/5"></div>
+                          </div>
+                        </div>
+                        
+                        <div className="h-16 bg-gray-100 rounded mb-4"></div>
+                        
+                        <div className="flex items-center justify-between">
+                          <div className="w-20 h-4 bg-gray-200 rounded"></div>
+                          <div className="w-28 h-8 bg-gray-300 rounded-md"></div>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
                 </div>
               ) : papers.length === 0 ? (
                 <div className="text-center py-12">
@@ -1414,76 +1669,74 @@ const PaperApprovals = () => {
                 <div className="mt-6">
                   <div className="space-y-4">
                     {papers.map(paper => (
-                      <div key={paper.id} className="bg-orion-lightBg p-4 rounded-lg border border-orion-lightGray shadow-sm">
-                        <div className="flex justify-between items-start">
-                          <div>
-                            <h4 className="font-medium text-orion-darkGray">{paper.title}</h4>
-                            <p className="text-sm text-orion-gray mt-1">Field: {paper.researchField}</p>
-                            <p className="text-sm text-orion-gray">
-                              Author: {formatAddress(paper.author)}
-                            </p>
-                            <div className="mt-2">
-                              <span className="text-xs font-medium bg-orion-lightGray px-2 py-1 rounded-full">
-                                Price: {paper.price} ETH
-                              </span>
-                              {paper.isRevision && (
-                                <span className="ml-2 text-xs font-medium bg-orion-lightGray/70 text-orion-primaryDark px-2 py-1 rounded-full">
-                                  Revision
-                                </span>
-                              )}
+                      <div key={paper.id} className="bg-white rounded-lg shadow-md overflow-hidden hover:shadow-lg transition-shadow">
+                        <div className="p-5">
+                          <div className="flex justify-between items-start mb-4">
+                            <div>
+                              <h3 className="text-lg font-medium text-orion-darkGray">{paper.title}</h3>
+                              <p className="text-sm text-orion-gray mt-1">
+                                {paper.researchField ? `${paper.researchField}` : 'Research Paper'}
+                                {paper.price && ` • ${paper.price} ETH`}
+                              </p>
                             </div>
-                          </div>
-                          <div className="flex flex-col items-end">
-                            {paper.isDecided ? (
-                              <span className={`text-sm font-medium px-3 py-1 rounded-full ${
-                                paper.isApproved 
-                                  ? 'bg-green-100 text-green-800'
-                                  : 'bg-red-100 text-red-800'
-                              }`}>
-                                {paper.isApproved ? 'Approved' : 'Rejected'}
-                              </span>
-                            ) : (
-                              <div className="flex flex-col items-end">
-                                <span className="text-sm font-medium bg-amber-100 text-amber-800 px-3 py-1 rounded-full">
-                                  Pending
-                                </span>
-                                <div className="mt-1 text-xs text-orion-gray">
-                                  {paper.approvalCount + paper.rejectionCount}/{paper.minRequiredVotes} votes cast
+                            {paper.authorDetails && (
+                              <div className="flex items-center">
+                                <div className="w-10 h-10 rounded-full bg-orion-lightGray flex items-center justify-center text-orion-darkGray font-medium text-sm">
+                                  {paper.authorDetails.name ? paper.authorDetails.name.charAt(0).toUpperCase() : 'U'}
+                                </div>
+                                <div className="ml-2">
+                                  <p className="text-sm font-medium">{paper.authorDetails.name || 'Unknown Author'}</p>
+                                  <p className="text-xs text-orion-gray">{formatDate(paper.submissionDate)}</p>
                                 </div>
                               </div>
                             )}
-                            
-                            <div className="mt-3 flex space-x-1">
-                              <span className="text-xs bg-green-50 text-green-700 px-2 py-0.5 rounded-full">
-                                {paper.approvalCount} Approvals
-                              </span>
-                              <span className="text-xs bg-red-50 text-red-700 px-2 py-0.5 rounded-full">
-                                {paper.rejectionCount} Rejections
-                              </span>
-                            </div>
                           </div>
-                        </div>
-                        
-                        {!paper.isDecided && !paper.hasVoted && (
-                          <div className="mt-4 flex justify-end">
+                          
+                          {/* Vote Progress Indicator */}
+                          {paper.voteCount !== undefined && paper.requiredVotes !== undefined && (
+                            <div className="mb-4">
+                              <div className="flex justify-between items-center mb-1">
+                                <span className="text-xs font-medium text-orion-darkGray">Review Progress</span>
+                                <span className="text-xs text-orion-gray">{paper.voteCount} of {paper.requiredVotes} votes</span>
+                              </div>
+                              <div className="h-2 bg-gray-200 rounded-full overflow-hidden">
+                                <div 
+                                  className="h-full bg-gradient-to-r from-orion-darkGray to-orion-mediumGray" 
+                                  style={{ width: `${(paper.voteCount / paper.requiredVotes) * 100}%` }}
+                                ></div>
+                              </div>
+                            </div>
+                          )}
+                          
+                          <p className="text-sm text-orion-gray mb-4 line-clamp-2">
+                            {paper.abstract || 'No abstract available for this paper.'}
+                          </p>
+                          
+                          <div className="flex items-center justify-between">
+                            <div className="flex flex-col">
+                              <div className="flex items-center">
+                                <svg className="w-4 h-4 text-orion-gray mr-1" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                </svg>
+                                <span className="text-xs text-orion-gray">{formatDate(paper.submissionDate)}</span>
+                              </div>
+                            </div>
                             <button
-                              onClick={() => handleOpenVoteModal(paper.id)}
-                              className="px-3 py-1.5 bg-orion-darkGray text-white text-sm font-medium rounded-md hover:bg-orion-mediumGray transition-colors"
+                              onClick={() => {
+                                console.log("Clicked Review & Vote for paper:", paper.id);
+                                console.log("Paper details:", paper);
+                                setVotingPaperId(paper.id);
+                                setVoteComment('');
+                                setVoteApproval(true);
+                              }}
+                              className="px-4 py-2 bg-orion-darkGray text-white rounded-md shadow-sm text-sm font-medium hover:bg-orion-mediumGray transition-colors"
                               tabIndex="0"
-                              aria-label={`Vote on paper: ${paper.title}`}
+                              aria-label="Review and vote on this paper"
                             >
-                              Cast Your Vote
+                              Review & Vote
                             </button>
                           </div>
-                        )}
-                        
-                        {!paper.isDecided && paper.hasVoted && (
-                          <div className="mt-4 flex justify-end">
-                            <span className="px-3 py-1.5 bg-gray-100 text-gray-600 text-sm font-medium rounded-md">
-                              Vote Submitted
-                            </span>
-                          </div>
-                        )}
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -1495,111 +1748,222 @@ const PaperApprovals = () => {
       </div>
 
       {/* Voting Modal */}
+      {console.log("Voting modal check - votingPaperId:", votingPaperId)}
       {votingPaperId !== null && (
-        <div className="fixed inset-0 bg-black/50 flex justify-center items-center z-50 p-4">
-          <div className="bg-white rounded-xl max-w-md w-full overflow-hidden shadow-xl">
+        <div className="fixed inset-0 z-50 overflow-y-auto bg-black bg-opacity-50 flex items-center justify-center">
+        {console.log("Rendering modal for paper ID:", votingPaperId)}
+          <div className="bg-white rounded-lg shadow-xl w-full max-w-3xl mx-4 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
+              <h3 className="text-lg font-semibold text-orion-darkGray">Review & Vote</h3>
+              <button
+                onClick={handleCloseVoteModal}
+                className="text-orion-gray hover:text-orion-darkGray rounded-full p-1"
+              >
+                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12"></path>
+                </svg>
+              </button>
+            </div>
+
             <div className="p-6">
-              <h3 className="text-xl font-bold text-orion-darkGray mb-4">
-                Vote on Paper #{votingPaperId}
-              </h3>
-              
-              {papers.find(p => p.id === votingPaperId) && (
-                <div className="mb-4 text-sm">
-                  <p className="font-medium">{papers.find(p => p.id === votingPaperId).title}</p>
-                  <p className="text-orion-gray mt-1">{papers.find(p => p.id === votingPaperId).researchField}</p>
-                </div>
-              )}
-              
-              <div className="mb-4">
-                <label className="block text-sm font-medium text-orion-darkGray mb-2">
-                  Your Decision
-                </label>
-                <div className="flex space-x-4">
-                  <button
-                    onClick={() => setVoteApproval(true)}
-                    className={`flex-1 py-2 px-3 rounded-md text-sm font-medium ${
-                      voteApproval 
-                        ? 'bg-green-100 text-green-800 border-2 border-green-300' 
-                        : 'bg-gray-100 text-gray-800 border border-gray-300 hover:bg-gray-200'
-                    }`}
-                    tabIndex="0"
-                    aria-label="Approve paper"
-                  >
-                    Approve
-                  </button>
-                  <button
-                    onClick={() => setVoteApproval(false)}
-                    className={`flex-1 py-2 px-3 rounded-md text-sm font-medium ${
-                      !voteApproval 
-                        ? 'bg-red-100 text-red-800 border-2 border-red-300' 
-                        : 'bg-gray-100 text-gray-800 border border-gray-300 hover:bg-gray-200'
-                    }`}
-                    tabIndex="0"
-                    aria-label="Reject paper"
-                  >
-                    Reject
-                  </button>
-                </div>
-              </div>
-              
-              <div className="mb-6">
-                <label htmlFor="comment" className="block text-sm font-medium text-orion-darkGray mb-2">
-                  Comment (required)
-                </label>
-                <textarea
-                  id="comment"
-                  value={voteComment}
-                  onChange={(e) => setVoteComment(e.target.value)}
-                  placeholder={voteApproval 
-                    ? "Explain why you approve this paper..." 
-                    : "Explain why you reject this paper..."}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-orion-darkGray focus:border-orion-darkGray"
-                  rows="4"
-                  tabIndex="0"
-                  aria-label="Enter your comment"
-                  required
-                />
-              </div>
-              
-              {error && (
-                <div className="mb-4 p-3 bg-red-100 border border-red-400 text-red-700 rounded-md text-sm">
-                  {error}
-                </div>
-              )}
-              
-              <div className="flex justify-end space-x-3">
-                <button
-                  onClick={handleCloseVoteModal}
-                  className="px-4 py-2 border border-gray-300 text-orion-gray rounded-md shadow-sm text-sm font-medium hover:bg-gray-50"
-                  tabIndex="0"
-                  aria-label="Cancel voting"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={handleSubmitVote}
-                  disabled={submittingVote || !voteComment.trim()}
-                  className={`px-4 py-2 rounded-md shadow-sm text-sm font-medium 
-                    ${voteComment.trim() && !submittingVote
-                      ? "bg-orion-darkGray text-white hover:bg-orion-mediumGray" 
-                      : "bg-gray-300 text-gray-500 cursor-not-allowed"
-                    }`}
-                  tabIndex="0"
-                  aria-label="Submit your vote"
-                >
-                  {submittingVote ? (
-                    <div className="flex items-center">
-                      <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                      </svg>
-                      Submitting...
+              {console.log("Papers array:", papers)}
+              {console.log("Looking for paper with ID:", votingPaperId)}
+              {console.log("Paper found:", papers.find(p => p.id === votingPaperId))}
+              {papers.find(p => p.id === votingPaperId) ? (
+                <div>
+                  <div className="mb-6">
+                    <h4 className="text-xl font-semibold text-orion-darkGray mb-2">
+                      {papers.find(p => p.id === votingPaperId).title}
+                    </h4>
+                    
+                    <div className="flex flex-wrap gap-3 mb-4">
+                      <div className="flex items-center px-3 py-1 bg-gray-100 rounded-full text-sm text-orion-gray">
+                        <svg className="w-4 h-4 mr-1" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                        </svg>
+                        {papers.find(p => p.id === votingPaperId).researchField}
+                      </div>
+                      
+                      <div className="flex items-center px-3 py-1 bg-gray-100 rounded-full text-sm text-orion-gray">
+                        <svg className="w-4 h-4 mr-1" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                        {papers.find(p => p.id === votingPaperId).price} ETH
+                      </div>
                     </div>
-                  ) : (
-                    "Submit Vote"
-                  )}
-                </button>
-              </div>
+
+                    {/* Vote Progress Indicator */}
+                    <div className="mb-5">
+                      <div className="flex justify-between items-center mb-1">
+                        <span className="text-sm font-medium text-orion-darkGray">Review Progress</span>
+                        <span className="text-sm text-orion-gray">
+                          {papers.find(p => p.id === votingPaperId).approvalCount + papers.find(p => p.id === votingPaperId).rejectionCount} of {papers.find(p => p.id === votingPaperId).minRequiredVotes} votes
+                        </span>
+                      </div>
+                      <div className="h-2.5 bg-gray-200 rounded-full overflow-hidden">
+                        <div 
+                          className="h-full bg-gradient-to-r from-orion-darkGray to-orion-mediumGray" 
+                          style={{ 
+                            width: `${Math.min(100, ((papers.find(p => p.id === votingPaperId).approvalCount + 
+                            papers.find(p => p.id === votingPaperId).rejectionCount) / 
+                            papers.find(p => p.id === votingPaperId).minRequiredVotes) * 100)}%` 
+                          }}
+                        ></div>
+                      </div>
+                    </div>
+                    
+                    <div className="mb-5">
+                      <h5 className="text-sm font-semibold text-orion-darkGray mb-2">Abstract</h5>
+                      <div className="bg-orion-lightBg/30 p-3 rounded-md">
+                        <p className="text-sm">
+                          {papers.find(p => p.id === votingPaperId).abstract || 'No abstract available for this paper.'}
+                        </p>
+                      </div>
+                    </div>
+                    
+                    {papers.find(p => p.id === votingPaperId).fileUrl && (
+                      <div className="mb-5 bg-gray-50 p-4 rounded-md">
+                        <h5 className="text-sm font-semibold text-orion-darkGray mb-2">Research Paper</h5>
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center">
+                            <svg className="w-6 h-6 text-orion-gray mr-2" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                            </svg>
+                            <div>
+                              <p className="font-medium">{formatFileName(papers.find(p => p.id === votingPaperId).fileUrl) || 'Research Paper.pdf'}</p>
+                              {papers.find(p => p.id === votingPaperId).fileSize && (
+                                <p className="text-sm text-orion-gray">{formatFileSize(papers.find(p => p.id === votingPaperId).fileSize)}</p>
+                              )}
+                            </div>
+                          </div>
+                          <button
+                            onClick={() => handleViewPaper(papers.find(p => p.id === votingPaperId).fileUrl)}
+                            className="px-4 py-2 bg-orion-darkGray text-white text-sm font-medium rounded-md hover:bg-orion-mediumGray transition-colors flex items-center"
+                            tabIndex="0"
+                            aria-label="View full paper in new tab"
+                          >
+                            <svg className="w-4 h-4 mr-1" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                            </svg>
+                            View Full Paper
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="border-t border-gray-200 pt-6">
+                      <h5 className="font-semibold text-orion-darkGray mb-4">Cast Your Vote</h5>
+                      
+                      <div className="mb-4">
+                        <label className="block text-sm font-medium text-orion-darkGray mb-2">
+                          Your Decision
+                        </label>
+                        <div className="flex space-x-4">
+                          <button
+                            onClick={() => setVoteApproval(true)}
+                            className={`flex-1 py-3 px-4 rounded-md text-sm font-medium ${
+                              voteApproval 
+                                ? 'bg-green-100 text-green-800 border-2 border-green-300' 
+                                : 'bg-gray-100 text-gray-800 border border-gray-300 hover:bg-gray-200'
+                            }`}
+                            tabIndex="0"
+                            aria-label="Approve paper"
+                          >
+                            <div className="flex justify-center items-center">
+                              <svg className={`w-5 h-5 mr-2 ${voteApproval ? 'text-green-600' : 'text-gray-500'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7"></path>
+                              </svg>
+                              Approve
+                            </div>
+                          </button>
+                          <button
+                            onClick={() => setVoteApproval(false)}
+                            className={`flex-1 py-3 px-4 rounded-md text-sm font-medium ${
+                              !voteApproval 
+                                ? 'bg-red-100 text-red-800 border-2 border-red-300' 
+                                : 'bg-gray-100 text-gray-800 border border-gray-300 hover:bg-gray-200'
+                            }`}
+                            tabIndex="0"
+                            aria-label="Reject paper"
+                          >
+                            <div className="flex justify-center items-center">
+                              <svg className={`w-5 h-5 mr-2 ${!voteApproval ? 'text-red-600' : 'text-gray-500'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path>
+                              </svg>
+                              Reject
+                            </div>
+                          </button>
+                        </div>
+                      </div>
+                      
+                      <div className="mb-6">
+                        <label htmlFor="comment" className="block text-sm font-medium text-orion-darkGray mb-2">
+                          Comment (required)
+                        </label>
+                        <textarea
+                          id="comment"
+                          value={voteComment}
+                          onChange={(e) => setVoteComment(e.target.value)}
+                          placeholder={voteApproval 
+                            ? "Explain why you approve this paper..." 
+                            : "Explain why you reject this paper..."}
+                          className="w-full px-4 py-3 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-orion-darkGray focus:border-orion-darkGray"
+                          rows="4"
+                          tabIndex="0"
+                          aria-label="Enter your comment"
+                          required
+                        />
+                        <p className="mt-1 text-xs text-orion-gray">
+                          Your comment will be visible to the author and other DAO members.
+                        </p>
+                      </div>
+                      
+                      {error && (
+                        <div className="mb-4 p-3 bg-red-100 border border-red-400 text-red-700 rounded-md text-sm">
+                          {error}
+                        </div>
+                      )}
+                      
+                      <div className="flex justify-end space-x-3">
+                        <button
+                          onClick={handleCloseVoteModal}
+                          className="px-4 py-2 border border-gray-300 text-orion-gray rounded-md shadow-sm text-sm font-medium hover:bg-gray-50"
+                          tabIndex="0"
+                          aria-label="Cancel voting"
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          onClick={handleSubmitVote}
+                          disabled={submittingVote || !voteComment.trim()}
+                          className={`px-6 py-2 rounded-md shadow-sm text-sm font-medium 
+                            ${voteComment.trim() && !submittingVote
+                              ? "bg-orion-darkGray text-white hover:bg-orion-mediumGray" 
+                              : "bg-gray-300 text-gray-500 cursor-not-allowed"
+                            }`}
+                          tabIndex="0"
+                          aria-label="Submit your vote"
+                        >
+                          {submittingVote ? (
+                            <div className="flex items-center">
+                              <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                              </svg>
+                              Submitting...
+                            </div>
+                          ) : (
+                            "Submit Vote"
+                          )}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div>No paper found for the given ID.</div>
+              )}
             </div>
           </div>
         </div>
