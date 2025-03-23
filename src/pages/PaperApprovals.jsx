@@ -2,11 +2,13 @@ import { useState, useEffect } from 'react';
 import { ethers } from 'ethers';
 import DashboardLayout from '../components/DashboardLayout';
 import { useAuth } from '../contexts/AuthContext';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
+import { db } from '../config/firebase';
+import { doc, setDoc, Timestamp, addDoc, collection, serverTimestamp, query, where, getDocs } from 'firebase/firestore';
 
 const PaperApprovals = () => {
   const navigate = useNavigate();
-  const { currentUser } = useAuth();
+  const { currentUser, userRole } = useAuth();
   
   // Wallet connection state
   const [walletAddress, setWalletAddress] = useState('');
@@ -26,8 +28,15 @@ const PaperApprovals = () => {
   const [submittingVote, setSubmittingVote] = useState(false);
   const [successMessage, setSuccessMessage] = useState('');
   
+  // DAO membership request state
+  const [showRequestModal, setShowRequestModal] = useState(false);
+  const [requestReason, setRequestReason] = useState('');
+  const [requestLoading, setRequestLoading] = useState(false);
+  const [requestSuccess, setRequestSuccess] = useState(false);
+  const [hasRequestedMembership, setHasRequestedMembership] = useState(false);
+
   // Contract details from WalletConnection.jsx
-  const contractAddress = '0x56bed8Fb1C2081057cbcF72b3f9828E5799a955C';
+  const contractAddress = '0x41fC6ddc097bCf6685446B0803d45755b344Ff1E';
   const contractABI = [
 	{
 		"inputs": [],
@@ -806,6 +815,30 @@ const PaperApprovals = () => {
     }
   }, [isConnected, contract]);
 
+  // Check if user has already requested membership
+  useEffect(() => {
+    const checkExistingRequest = async () => {
+      if (!currentUser || !walletAddress) return;
+      
+      try {
+        const requestQuery = query(
+          collection(db, 'membershipRequests'),
+          where('walletAddress', '==', walletAddress),
+          where('status', '==', 'pending')
+        );
+        
+        const requestSnapshot = await getDocs(requestQuery);
+        setHasRequestedMembership(!requestSnapshot.empty);
+      } catch (err) {
+        console.error('Error checking membership requests:', err);
+      }
+    };
+    
+    if (walletAddress) {
+      checkExistingRequest();
+    }
+  }, [currentUser, walletAddress]);
+
   // Check if wallet is connected
   const checkWalletConnection = async () => {
     if (typeof window.ethereum !== 'undefined') {
@@ -861,18 +894,56 @@ const PaperApprovals = () => {
     window.location.reload();
   };
 
-  // Connect to wallet if not connected
+  // Initialize wallet and contract
+  const initializeContract = async () => {
+    if (!window.ethereum) {
+      setError("MetaMask not detected. Please install MetaMask to use this feature.");
+      return;
+    }
+    
+    try {
+      // Request account access
+      const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
+      const userAddress = accounts[0];
+      
+      // Create provider and signer
+      const ethersProvider = new ethers.BrowserProvider(window.ethereum);
+      const ethersSigner = await ethersProvider.getSigner();
+      
+      // Initialize contract instance
+      const contractInstance = new ethers.Contract(
+        contractAddress,
+        contractABI,
+        ethersSigner
+      );
+      
+      // Update state
+      setWalletAddress(userAddress);
+      setProvider(ethersProvider);
+      setSigner(ethersSigner);
+      setContract(contractInstance);
+      setIsConnected(true);
+      
+      // Check if the user is a DAO member
+      await checkDAOMembership();
+      
+      // Fetch papers
+      await fetchPapers();
+      
+    } catch (error) {
+      console.error('Error initializing contract:', error);
+      setError('Failed to initialize contract. Please check your connection and try again.');
+    }
+  };
+
+  // Connect wallet
   const connectWallet = async () => {
-    if (typeof window.ethereum !== 'undefined') {
-      try {
-        await window.ethereum.request({ method: 'eth_requestAccounts' });
-        // The checkWalletConnection useEffect will handle the rest
-      } catch (error) {
-        console.error('User rejected wallet connection:', error);
-        setError('Failed to connect wallet. Please try again and approve the connection request.');
-      }
-    } else {
-      setError('MetaMask is not installed. Please install MetaMask to use this feature.');
+    setError('');
+    try {
+      await initializeContract();
+    } catch (error) {
+      console.error('Error connecting wallet:', error);
+      setError(`Failed to connect wallet: ${error.message}`);
     }
   };
 
@@ -894,15 +965,13 @@ const PaperApprovals = () => {
     try {
       if (!contract || !walletAddress) return false;
       
-      // Get voters for the paper
+      // Get the voters for the paper
       const voters = await contract.getPaperVoters(paperId);
       
-      // Check if current wallet address is in the voters array
-      return voters.some(voter => 
-        voter.toLowerCase() === walletAddress.toLowerCase()
-      );
+      // Check if the current user's wallet address is in the voters array
+      return voters.some(voter => voter.toLowerCase() === walletAddress.toLowerCase());
     } catch (error) {
-      console.error(`Error checking if user voted on paper ${paperId}:`, error);
+      console.error('Error checking if user voted:', error);
       return false;
     }
   };
@@ -1084,23 +1153,185 @@ const PaperApprovals = () => {
     navigate('/user-dashboard');
   };
 
+  // New function to handle membership request
+  const handleRequestMembership = async () => {
+    if (!currentUser || !walletAddress) {
+      setError('You need to connect your wallet first');
+      return;
+    }
+
+    setRequestLoading(true);
+    setError('');
+    try {
+      // Create a membership request document in Firestore
+      await addDoc(collection(db, 'membershipRequests'), {
+        walletAddress: walletAddress,
+        userEmail: currentUser.email,
+        userName: currentUser.displayName || currentUser.email.split('@')[0],
+        reason: requestReason,
+        status: 'pending',
+        createdAt: serverTimestamp(),
+        userId: currentUser.uid
+      });
+      
+      setRequestSuccess(true);
+      setHasRequestedMembership(true); // Update the request status
+      
+      setTimeout(() => {
+        setShowRequestModal(false);
+        setRequestSuccess(false);
+      }, 3000);
+    } catch (err) {
+      setError(`Failed to submit request: ${err.message}`);
+    }
+    setRequestLoading(false);
+  };
+
+  // Modify the "Not a DAO Member" display section to include a button
+  const renderNotMemberMessage = () => {
+    return (
+      <div className="bg-amber-50 border border-amber-100 p-8 rounded-lg text-center max-w-md mx-auto">
+        <div className="flex justify-center mb-4">
+          <svg className="w-12 h-12 text-amber-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+          </svg>
+        </div>
+        <h3 className="text-xl font-semibold mb-2">Not a DAO Member</h3>
+        <p className="text-gray-600 mb-6">
+          You are not registered as a member of the ScholarDAO. Only members can vote on paper submissions.
+        </p>
+        
+        {hasRequestedMembership ? (
+          <div className="bg-blue-50 p-4 rounded-md border border-blue-200">
+            <p className="text-blue-700 font-medium">Membership Request Pending</p>
+            <p className="text-sm text-blue-600 mt-1">
+              Your request to join the ScholarDAO is under review. You'll be notified once it's approved.
+            </p>
+          </div>
+        ) : (
+          <button
+            onClick={() => setShowRequestModal(true)}
+            className="px-4 py-2 bg-orion-primary text-white rounded-md hover:bg-orion-primaryDark transition-colors"
+          >
+            Request Membership
+          </button>
+        )}
+        
+        <p className="mt-3 text-sm text-gray-500">
+          Need help? Contact the DAO administrator for assistance.
+        </p>
+      </div>
+    );
+  };
+
+  // Add the membership request modal
+  const renderRequestModal = () => {
+    return (
+      <div className={`fixed inset-0 z-50 flex items-center justify-center ${showRequestModal ? 'block' : 'hidden'}`}>
+        <div className="absolute inset-0 bg-black opacity-50" onClick={() => setShowRequestModal(false)}></div>
+        <div className="bg-white rounded-lg p-6 max-w-md w-full relative z-10">
+          <h3 className="text-xl font-semibold mb-4">Request DAO Membership</h3>
+          
+          {requestSuccess ? (
+            <div className="p-4 bg-green-100 text-green-700 rounded-md mb-4">
+              Your membership request has been submitted successfully! The DAO administrator will review your request.
+            </div>
+          ) : (
+            <>
+              <p className="mb-4 text-gray-600">
+                Please provide a reason why you would like to become a member of the ScholarDAO. This information will help the administrator review your request.
+              </p>
+              
+              <textarea
+                className="w-full p-3 border border-gray-300 rounded-md mb-4 h-32"
+                placeholder="Explain why you would like to join the ScholarDAO..."
+                value={requestReason}
+                onChange={(e) => setRequestReason(e.target.value)}
+                disabled={requestLoading}
+              ></textarea>
+              
+              {error && (
+                <div className="p-3 bg-red-100 text-red-700 rounded-md mb-4">
+                  {error}
+                </div>
+              )}
+              
+              <div className="flex justify-end space-x-3">
+                <button
+                  className="px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50"
+                  onClick={() => setShowRequestModal(false)}
+                  disabled={requestLoading}
+                >
+                  Cancel
+                </button>
+                <button
+                  className="px-4 py-2 bg-orion-primary text-white rounded-md hover:bg-orion-primaryDark disabled:opacity-50"
+                  onClick={handleRequestMembership}
+                  disabled={requestLoading || !requestReason.trim()}
+                >
+                  {requestLoading ? 'Submitting...' : 'Submit Request'}
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  // Function to check if the user is a DAO member
+  const checkDAOMembership = async () => {
+    try {
+      if (!contract || !walletAddress) {
+        setIsMember(false);
+        return false;
+      }
+      
+      // Call the members mapping in the contract to check membership
+      const isMemberResult = await contract.members(walletAddress);
+      setIsMember(isMemberResult);
+      
+      return isMemberResult;
+    } catch (error) {
+      console.error('Error checking DAO membership:', error);
+      setError('Failed to check DAO membership status.');
+      setIsMember(false);
+      return false;
+    }
+  };
+
   return (
     <DashboardLayout>
       <div className="max-w-6xl mx-auto">
         {/* Header */}
         <div className="flex justify-between items-center mb-8">
           <h1 className="text-2xl font-bold text-orion-darkGray">Paper Approvals</h1>
-          <button
-            onClick={handleBackToDashboard}
-            className="text-orion-darkGray hover:text-orion-mediumGray flex items-center"
-            tabIndex="0"
-            aria-label="Return to dashboard"
-          >
-            <svg className="w-5 h-5 mr-1" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
-            </svg>
-            Back to Dashboard
-          </button>
+          <div className="flex items-center space-x-4">
+            {userRole === 'admin' && (
+              <Link
+                to="/admin/committee"
+                className="text-orion-mediumGray hover:text-orion-darkGray flex items-center"
+                tabIndex="0"
+                aria-label="Manage ScholarDAO Committee"
+              >
+                <svg className="w-5 h-5 mr-1" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+                </svg>
+                Manage Committee
+              </Link>
+            )}
+            <button
+              onClick={handleBackToDashboard}
+              className="text-orion-darkGray hover:text-orion-mediumGray flex items-center"
+              tabIndex="0"
+              aria-label="Return to dashboard"
+            >
+              <svg className="w-5 h-5 mr-1" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+              </svg>
+              Back to Dashboard
+            </button>
+          </div>
         </div>
 
         {/* Main Content */}
@@ -1146,20 +1377,7 @@ const PaperApprovals = () => {
               </div>
             </div>
           ) : !isMember ? (
-            <div className="p-8 text-center">
-              <div className="bg-amber-50 border border-amber-200 rounded-lg p-6 max-w-md mx-auto">
-                <svg className="mx-auto h-12 w-12 text-amber-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                </svg>
-                <h3 className="mt-4 text-lg font-medium text-orion-darkGray">Not a DAO Member</h3>
-                <p className="mt-2 text-sm text-orion-gray">
-                  You are not registered as a member of the ScholarDAO. Only members can vote on paper submissions.
-                </p>
-                <p className="mt-2 text-xs text-orion-gray">
-                  Please contact the DAO administrator to request membership.
-                </p>
-              </div>
-            </div>
+            renderNotMemberMessage()
           ) : (
             <div className="p-8">
               {error && (
@@ -1193,122 +1411,79 @@ const PaperApprovals = () => {
                   </p>
                 </div>
               ) : (
-                <div>
-                  <div className="mb-6">
-                    <h3 className="text-lg font-medium text-orion-darkGray mb-2">Papers for Review</h3>
-                    <p className="text-sm text-orion-gray">
-                      Below are the submitted research papers that require verification. Papers need {isMember && 'at least'} votes from DAO members before they can be approved or rejected.
-                    </p>
-                  </div>
-                  
-                  {/* Paper List */}
-                  <div className="space-y-6">
-                    {papers.map((paper) => (
-                      <div 
-                        key={paper.id}
-                        className={`border rounded-lg overflow-hidden ${
-                          paper.isDecided
-                            ? paper.isApproved
-                              ? 'border-green-200 bg-green-50'
-                              : 'border-red-200 bg-red-50'
-                            : 'border-gray-200'
-                        }`}
-                      >
-                        <div className="p-4 sm:p-6">
-                          <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start">
-                            <div className="mb-4 sm:mb-0 sm:mr-6">
-                              <h4 className="text-xl font-medium text-orion-darkGray">{paper.title}</h4>
-                              
-                              <div className="mt-2 flex flex-wrap gap-2">
-                                <span className="inline-flex items-center px-2.5 py-0.5 rounded-md text-xs font-medium bg-blue-100 text-blue-800">
-                                  ID: {paper.id}
+                <div className="mt-6">
+                  <div className="space-y-4">
+                    {papers.map(paper => (
+                      <div key={paper.id} className="bg-orion-lightBg p-4 rounded-lg border border-orion-lightGray shadow-sm">
+                        <div className="flex justify-between items-start">
+                          <div>
+                            <h4 className="font-medium text-orion-darkGray">{paper.title}</h4>
+                            <p className="text-sm text-orion-gray mt-1">Field: {paper.researchField}</p>
+                            <p className="text-sm text-orion-gray">
+                              Author: {formatAddress(paper.author)}
+                            </p>
+                            <div className="mt-2">
+                              <span className="text-xs font-medium bg-orion-lightGray px-2 py-1 rounded-full">
+                                Price: {paper.price} ETH
+                              </span>
+                              {paper.isRevision && (
+                                <span className="ml-2 text-xs font-medium bg-orion-lightGray/70 text-orion-primaryDark px-2 py-1 rounded-full">
+                                  Revision
                                 </span>
-                                <span className="inline-flex items-center px-2.5 py-0.5 rounded-md text-xs font-medium bg-purple-100 text-purple-800">
-                                  {paper.researchField}
-                                </span>
-                                {paper.isRevision && (
-                                  <span className="inline-flex items-center px-2.5 py-0.5 rounded-md text-xs font-medium bg-amber-100 text-amber-800">
-                                    Revision of #{paper.previousVersion}
-                                  </span>
-                                )}
-                              </div>
-                              
-                              <div className="mt-3 text-sm text-orion-gray">
-                                <p><span className="font-medium">Author:</span> {formatAddress(paper.author)}</p>
-                                <p><span className="font-medium">Team:</span> {paper.teamMembers}</p>
-                                <p><span className="font-medium">Access Price:</span> {paper.price} EDU</p>
-                              </div>
-                            </div>
-                            
-                            <div className="flex flex-col items-start sm:items-end space-y-3">
-                              {/* Voting Progress */}
-                              <div className="w-full max-w-[200px]">
-                                <div className="flex justify-between text-xs mb-1">
-                                  <span>Voting Progress</span>
-                                  <span>{paper.approvalCount + paper.rejectionCount} / {paper.minRequiredVotes} votes</span>
-                                </div>
-                                <div className="w-full bg-gray-200 rounded-full h-2.5 mb-1">
-                                  <div 
-                                    className="bg-orion-darkGray h-2.5 rounded-full" 
-                                    style={{ width: `${Math.min(100, ((Number(paper.approvalCount) + Number(paper.rejectionCount)) / Number(paper.minRequiredVotes)) * 100)}%` }}
-                                  ></div>
-                                </div>
-                              </div>
-                              
-                              <div className="flex items-center space-x-2">
-                                <div className="flex items-center text-green-600">
-                                  <svg className="h-5 w-5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
-                                    <path d="M10 12a2 2 0 100-4 2 2 0 000 4z" />
-                                    <path fillRule="evenodd" d="M.458 10C1.732 5.943 5.522 3 10 3s8.268 2.943 9.542 7c-1.274 4.057-5.064 7-9.542 7S1.732 14.057.458 10zM14 10a4 4 0 11-8 0 4 4 0 018 0z" clipRule="evenodd" />
-                                  </svg>
-                                  <span className="ml-1">{paper.approvalCount}</span>
-                                </div>
-                                <div className="flex items-center text-red-600">
-                                  <svg className="h-5 w-5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
-                                    <path fillRule="evenodd" d="M3.707 2.293a1 1 0 00-1.414 1.414l14 14a1 1 0 001.414-1.414l-1.473-1.473A10.014 10.014 0 0019.542 10C18.268 5.943 14.478 3 10 3a9.958 9.958 0 00-4.512 1.074l-1.78-1.781zm4.261 4.26l1.514 1.515a2.003 2.003 0 012.45 2.45l1.514 1.514a4 4 0 00-5.478-5.478z" clipRule="evenodd" />
-                                    <path d="M12.454 16.697L9.75 13.992a4 4 0 01-3.742-3.741L2.335 6.578A9.98 9.98 0 00.458 10c1.274 4.057 5.065 7 9.542 7 .847 0 1.669-.105 2.454-.303z" />
-                                  </svg>
-                                  <span className="ml-1">{paper.rejectionCount}</span>
-                                </div>
-                              </div>
-                              
-                              {/* Status Badge */}
-                              {paper.isDecided ? (
-                                <span className={`px-3 py-1 rounded-full text-xs font-medium ${
-                                  paper.isApproved
-                                    ? 'bg-green-100 text-green-800'
-                                    : 'bg-red-100 text-red-800'
-                                }`}>
-                                  {paper.isApproved ? 'Approved' : 'Rejected'}
-                                </span>
-                              ) : (
-                                <span className="px-3 py-1 bg-yellow-100 text-yellow-800 rounded-full text-xs font-medium">
-                                  Pending Verification
-                                </span>
-                              )}
-                              
-                              {/* Vote Button */}
-                              {!paper.isDecided && !paper.hasVoted && paper.author.toLowerCase() !== walletAddress.toLowerCase() && (
-                                <button
-                                  onClick={() => handleOpenVoteModal(paper.id)}
-                                  className="mt-2 px-4 py-2 bg-orion-darkGray text-white rounded-md shadow-sm text-sm font-medium hover:bg-orion-mediumGray transition-colors"
-                                  tabIndex="0"
-                                  aria-label={`Vote on paper ${paper.title}`}
-                                >
-                                  Cast Vote
-                                </button>
-                              )}
-                              
-                              {paper.hasVoted && (
-                                <span className="text-xs text-orion-gray mt-2 italic">You have already voted on this paper</span>
-                              )}
-                              
-                              {paper.author.toLowerCase() === walletAddress.toLowerCase() && (
-                                <span className="text-xs text-orion-gray mt-2 italic">You cannot vote on your own paper</span>
                               )}
                             </div>
                           </div>
+                          <div className="flex flex-col items-end">
+                            {paper.isDecided ? (
+                              <span className={`text-sm font-medium px-3 py-1 rounded-full ${
+                                paper.isApproved 
+                                  ? 'bg-green-100 text-green-800'
+                                  : 'bg-red-100 text-red-800'
+                              }`}>
+                                {paper.isApproved ? 'Approved' : 'Rejected'}
+                              </span>
+                            ) : (
+                              <div className="flex flex-col items-end">
+                                <span className="text-sm font-medium bg-amber-100 text-amber-800 px-3 py-1 rounded-full">
+                                  Pending
+                                </span>
+                                <div className="mt-1 text-xs text-orion-gray">
+                                  {paper.approvalCount + paper.rejectionCount}/{paper.minRequiredVotes} votes cast
+                                </div>
+                              </div>
+                            )}
+                            
+                            <div className="mt-3 flex space-x-1">
+                              <span className="text-xs bg-green-50 text-green-700 px-2 py-0.5 rounded-full">
+                                {paper.approvalCount} Approvals
+                              </span>
+                              <span className="text-xs bg-red-50 text-red-700 px-2 py-0.5 rounded-full">
+                                {paper.rejectionCount} Rejections
+                              </span>
+                            </div>
+                          </div>
                         </div>
+                        
+                        {!paper.isDecided && !paper.hasVoted && (
+                          <div className="mt-4 flex justify-end">
+                            <button
+                              onClick={() => handleOpenVoteModal(paper.id)}
+                              className="px-3 py-1.5 bg-orion-darkGray text-white text-sm font-medium rounded-md hover:bg-orion-mediumGray transition-colors"
+                              tabIndex="0"
+                              aria-label={`Vote on paper: ${paper.title}`}
+                            >
+                              Cast Your Vote
+                            </button>
+                          </div>
+                        )}
+                        
+                        {!paper.isDecided && paper.hasVoted && (
+                          <div className="mt-4 flex justify-end">
+                            <span className="px-3 py-1.5 bg-gray-100 text-gray-600 text-sm font-medium rounded-md">
+                              Vote Submitted
+                            </span>
+                          </div>
+                        )}
                       </div>
                     ))}
                   </div>
@@ -1429,6 +1604,9 @@ const PaperApprovals = () => {
           </div>
         </div>
       )}
+
+      {/* Add the request modal */}
+      {renderRequestModal()}
     </DashboardLayout>
   );
 };

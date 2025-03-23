@@ -17,6 +17,7 @@ import WalletConnection from './pages/WalletConnection';
 import PaperApprovals from './pages/PaperApprovals';
 import ProtectedRoute from './components/ProtectedRoute';
 import RoleBasedRoute from './components/RoleBasedRoute';
+import CommitteePage from './pages/CommitteePage';
 
 function App() {
   const [showSplash, setShowSplash] = useState(true);
@@ -60,6 +61,7 @@ function App() {
               {/* Admin routes */}
               <Route element={<RoleBasedRoute allowedRoles={['admin']} />}>
                 <Route path="/admin-dashboard" element={<AdminDashboard />} />
+                <Route path="/admin/committee" element={<CommitteePage />} />
               </Route>
             </Route>
           </Routes>

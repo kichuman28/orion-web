@@ -176,7 +176,7 @@ const SubmitPaper = () => {
       console.log('Signer address:', await ethSigner.getAddress());
       
       // Contract address - must match the deployed contract on EDU Chain
-      const contractAddress = '0x56bed8Fb1C2081057cbcF72b3f9828E5799a955C'; 
+      const contractAddress = '0x41fC6ddc097bCf6685446B0803d45755b344Ff1E'; 
       
       // Contract ABI - only the function we need
       const contractABI = [
@@ -394,7 +394,7 @@ const SubmitPaper = () => {
       const chainId = await window.ethereum.request({ method: 'eth_chainId' });
       const ethProvider = new ethers.BrowserProvider(window.ethereum);
       const ethSigner = await ethProvider.getSigner();
-      const contractAddress = '0x56bed8Fb1C2081057cbcF72b3f9828E5799a955C';
+      const contractAddress = '0x41fC6ddc097bCf6685446B0803d45755b344Ff1E';
       
       // Simple ABI to just check connection
       const minimalABI = [
