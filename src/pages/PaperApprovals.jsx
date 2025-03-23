@@ -5,6 +5,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useNavigate, Link } from 'react-router-dom';
 import { db } from '../config/firebase';
 import { doc, setDoc, Timestamp, addDoc, collection, serverTimestamp, query, where, getDocs, getDoc } from 'firebase/firestore';
+import PlagiarismResultsCard from '../components/PlagiarismResultsCard';
 
 const PaperApprovals = () => {
   const navigate = useNavigate();
@@ -1078,7 +1079,9 @@ const PaperApprovals = () => {
               submissionDate: firestoreData?.submissionDate?.toDate?.() || null,
               firestoreId: firestoreData?.id || null,
               authorName: firestoreData?.authorName || 'Anonymous Researcher',
-              authorEmail: firestoreData?.authorEmail || ''
+              authorEmail: firestoreData?.authorEmail || '',
+              // Add plagiarism data
+              plagiarism: firestoreData?.plagiarism || null
             });
           }
         } catch (error) {
@@ -1692,6 +1695,41 @@ const PaperApprovals = () => {
                             )}
                           </div>
                           
+                          {/* Add plagiarism badge */}
+                          {paper.plagiarism && paper.plagiarism.status === 'completed' && (
+                            <div className="mb-4">
+                              <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                                paper.plagiarism.isUnavailable ? 'bg-gray-100 text-gray-800' :
+                                paper.plagiarism.isPlagiarized 
+                                  ? 'bg-red-100 text-red-800' 
+                                  : 'bg-green-100 text-green-800'
+                              }`}>
+                                {paper.plagiarism.isUnavailable ? (
+                                  <>
+                                    <svg className="w-3 h-3 mr-1" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg">
+                                      <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
+                                    </svg>
+                                    Check unavailable
+                                  </>
+                                ) : paper.plagiarism.isPlagiarized ? (
+                                  <>
+                                    <svg className="w-3 h-3 mr-1" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg">
+                                      <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd"></path>
+                                    </svg>
+                                    Plagiarism detected
+                                  </>
+                                ) : (
+                                  <>
+                                    <svg className="w-3 h-3 mr-1" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg">
+                                      <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd"></path>
+                                    </svg>
+                                    Original content
+                                  </>
+                                )}
+                              </span>
+                            </div>
+                          )}
+                          
                           {/* Vote Progress Indicator */}
                           {paper.voteCount !== undefined && paper.requiredVotes !== undefined && (
                             <div className="mb-4">
@@ -1821,6 +1859,15 @@ const PaperApprovals = () => {
                       </div>
                     </div>
                     
+                    {/* Plagiarism Check Results */}
+                    <div className="mb-5">
+                      <h5 className="text-sm font-semibold text-orion-darkGray mb-2">Plagiarism Check</h5>
+                      <PlagiarismResultsCard 
+                        plagiarismData={papers.find(p => p.id === votingPaperId).plagiarism} 
+                        showDetails={true}
+                      />
+                    </div>
+
                     {papers.find(p => p.id === votingPaperId).fileUrl && (
                       <div className="mb-5 bg-gray-50 p-4 rounded-md">
                         <h5 className="text-sm font-semibold text-orion-darkGray mb-2">Research Paper</h5>
@@ -1852,7 +1899,7 @@ const PaperApprovals = () => {
                       </div>
                     )}
 
-                    <div className="border-t border-gray-200 pt-6">
+                      <div className="border-t border-gray-200 pt-6">
                       <h5 className="font-semibold text-orion-darkGray mb-4">Cast Your Vote</h5>
                       
                       <div className="mb-4">

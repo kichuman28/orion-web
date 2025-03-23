@@ -7,6 +7,7 @@ import { getIPFSGatewayURL } from '../config/ipfs';
 import { doc, setDoc, collection, serverTimestamp } from 'firebase/firestore';
 import { db } from '../config/firebase';
 import { ethers } from 'ethers';
+import { checkPlagiarism, formatPlagiarismResults } from '../services/plagiarismService';
 
 const SubmitPaper = () => {
   const { currentUser, walletAddress, isWalletConnected, connectWallet } = useAuth();
@@ -27,6 +28,10 @@ const SubmitPaper = () => {
   const [error, setError] = useState('');
   const [step, setStep] = useState(1); // 1: Form, 2: Review & Stake
   const [uploadProgress, setUploadProgress] = useState(0);
+  
+  // Plagiarism check state
+  const [plagiarismCheckInProgress, setPlagiarismCheckInProgress] = useState(false);
+  const [plagiarismResults, setPlagiarismResults] = useState(null);
   
   // Research fields options (for dropdown)
   const researchFields = [
@@ -49,12 +54,92 @@ const SubmitPaper = () => {
     'Other'
   ];
   
-  // Handle IPFS upload completion
-  const handleFileUploaded = (result, file) => {
+  // Handle IPFS upload completion and initiate plagiarism check
+  const handleFileUploaded = async (result, file) => {
     console.log('File uploaded to IPFS:', result);
     setIpfsResult(result);
     setFileName(file.name);
     setFileSize(file.size);
+    
+    // Start plagiarism check if we have a valid IPFS result
+    if (result && result.IpfsHash) {
+      const fileUrl = getIPFSGatewayURL(result.IpfsHash);
+      await performPlagiarismCheck(fileUrl);
+    }
+  };
+  
+  // Perform plagiarism check on the uploaded file
+  const performPlagiarismCheck = async (fileUrl) => {
+    try {
+      setPlagiarismCheckInProgress(true);
+      setPlagiarismResults({
+        status: 'pending',
+        overallStatus: 'In Progress',
+        isPlagiarized: false,
+        matchesFound: 0
+      });
+      
+      console.log('Starting plagiarism check for:', fileUrl);
+      
+      // Set a timeout for the API call to prevent long waits
+      const timeoutDuration = 10000; // 10 seconds
+      const timeoutPromise = new Promise((_, reject) => {
+        setTimeout(() => reject(new Error('Plagiarism check timed out')), timeoutDuration);
+      });
+      
+      try {
+        // Try calling the API with a timeout
+        const results = await Promise.race([
+          checkPlagiarism(fileUrl),
+          timeoutPromise
+        ]);
+        
+        // Format the results for storage
+        const formattedResults = formatPlagiarismResults(results);
+        setPlagiarismResults(formattedResults);
+        
+        console.log('Plagiarism check completed:', formattedResults);
+        
+        return formattedResults;
+      } catch (apiError) {
+        console.error('Plagiarism API error:', apiError);
+        
+        // Create a fallback "successful" check result to allow submission to continue
+        const fallbackResults = formatPlagiarismResults({
+          is_plagiarized: false,
+          matches_found: 0,
+          overall_status: 'Unavailable - Proceeding without check',
+          similarity_scores: []
+        });
+        
+        // Set a warning flag on the results
+        fallbackResults.isUnavailable = true;
+        fallbackResults.status = 'completed';
+        fallbackResults.overallStatus = 'API Unavailable - Proceeding without check';
+        
+        setPlagiarismResults(fallbackResults);
+        console.log('Using fallback plagiarism results:', fallbackResults);
+        
+        return fallbackResults;
+      }
+    } catch (error) {
+      console.error('Error during plagiarism check process:', error);
+      
+      // Set an error status but allow the user to continue
+      const errorResults = {
+        status: 'error',
+        errorMessage: error.message,
+        overallStatus: 'Error during check',
+        isPlagiarized: false,
+        matchesFound: 0,
+        similarityScores: []
+      };
+      
+      setPlagiarismResults(errorResults);
+      return errorResults;
+    } finally {
+      setPlagiarismCheckInProgress(false);
+    }
   };
   
   // Handle form submission
@@ -137,7 +222,16 @@ const SubmitPaper = () => {
           status: 'confirmed',
           timestamp: new Date().toISOString()
         },
-        blockchainVerified: Boolean(txHash)
+        blockchainVerified: Boolean(txHash),
+        // Add plagiarism check results
+        plagiarism: plagiarismResults || {
+          status: 'pending',
+          overallStatus: 'Pending',
+          isPlagiarized: false,
+          matchesFound: 0,
+          similarityScores: [],
+          checkDate: new Date().toISOString()
+        }
       };
       
       await setDoc(paperRef, paperData);
@@ -550,6 +644,65 @@ const SubmitPaper = () => {
                       submissionDate: new Date().toISOString()
                     })}
                   />
+                  
+                  {/* Plagiarism Check Status */}
+                  {ipfsResult && (
+                    <div className="mt-4">
+                      {plagiarismCheckInProgress ? (
+                        <div className="flex items-center space-x-2 text-sm text-blue-700">
+                          <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-blue-700" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                          </svg>
+                          <span>Checking document for plagiarism...</span>
+                        </div>
+                      ) : plagiarismResults ? (
+                        <div className={`text-sm rounded-md p-3 ${
+                          plagiarismResults.status === 'error' ? 'bg-yellow-50 text-yellow-800' :
+                          plagiarismResults.isUnavailable ? 'bg-gray-50 text-gray-700' :
+                          plagiarismResults.isPlagiarized ? 'bg-red-50 text-red-800' : 'bg-green-50 text-green-800'
+                        }`}>
+                          <div className="flex">
+                            {plagiarismResults.status === 'error' ? (
+                              <svg className="h-5 w-5 text-yellow-400 mr-2" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+                                <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                              </svg>
+                            ) : plagiarismResults.isUnavailable ? (
+                              <svg className="h-5 w-5 text-gray-400 mr-2" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+                                <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
+                              </svg>
+                            ) : plagiarismResults.isPlagiarized ? (
+                              <svg className="h-5 w-5 text-red-400 mr-2" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+                                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+                              </svg>
+                            ) : (
+                              <svg className="h-5 w-5 text-green-400 mr-2" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+                                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                              </svg>
+                            )}
+                            
+                            <div>
+                              <p className="font-medium">
+                                {plagiarismResults.status === 'error' ? 'Error checking plagiarism' :
+                                 plagiarismResults.isUnavailable ? 'Plagiarism check unavailable' :
+                                 plagiarismResults.isPlagiarized ? 'Potential plagiarism detected' : 'Document appears to be original'}
+                              </p>
+                              <p>
+                                {plagiarismResults.status === 'error' ? plagiarismResults.errorMessage :
+                                 plagiarismResults.isUnavailable ? 'The plagiarism check service is currently unavailable. You can continue with your submission.' :
+                                 `${plagiarismResults.matchesFound} similarity ${plagiarismResults.matchesFound === 1 ? 'match' : 'matches'} found`}
+                              </p>
+                              {plagiarismResults.isPlagiarized && (
+                                <p className="mt-1 font-medium">
+                                  You can still submit, but the committee will review the plagiarism report.
+                                </p>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      ) : null}
+                    </div>
+                  )}
                 </div>
                 
                 {/* Submit Button */}
@@ -634,6 +787,68 @@ const SubmitPaper = () => {
                 <p className="text-gray-800">{abstract}</p>
               </div>
             </div>
+            
+            {/* Plagiarism Check Results */}
+            {plagiarismResults && (
+              <div className={`p-5 rounded-lg mb-6 ${
+                plagiarismResults.status === 'error' ? 'bg-yellow-50' :
+                plagiarismResults.isPlagiarized ? 'bg-red-50' : 'bg-green-50'
+              }`}>
+                <h3 className="text-md font-medium text-gray-800 mb-2">Plagiarism Check Results</h3>
+                <div className={`flex items-start ${
+                  plagiarismResults.status === 'error' ? 'text-yellow-800' :
+                  plagiarismResults.isPlagiarized ? 'text-red-800' : 'text-green-800'
+                }`}>
+                  {plagiarismResults.status === 'error' ? (
+                    <svg className="h-6 w-6 mr-2 flex-shrink-0" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                    </svg>
+                  ) : plagiarismResults.isPlagiarized ? (
+                    <svg className="h-6 w-6 mr-2 flex-shrink-0" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                  ) : (
+                    <svg className="h-6 w-6 mr-2 flex-shrink-0" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7" />
+                    </svg>
+                  )}
+                  
+                  <div>
+                    <p className="font-semibold">
+                      {plagiarismResults.status === 'error' ? 'Error during plagiarism check' :
+                       plagiarismResults.isPlagiarized ? 'Potential plagiarism detected' : 'Document appears to be original'}
+                    </p>
+                    <p className="mt-1">
+                      {plagiarismResults.status === 'error' ? plagiarismResults.errorMessage :
+                       `${plagiarismResults.matchesFound} similarity ${plagiarismResults.matchesFound === 1 ? 'match' : 'matches'} found`}
+                    </p>
+                    
+                    {plagiarismResults.status !== 'error' && plagiarismResults.similarityScores?.length > 0 && (
+                      <div className="mt-3">
+                        <p className="font-medium">Similarity details:</p>
+                        <ul className="mt-1 list-disc list-inside text-sm">
+                          {plagiarismResults.similarityScores.slice(0, 3).map((score, index) => (
+                            <li key={index}>
+                              {score.reference_file || `Source ${index + 1}`}: {Math.round(score.similarity * 100)}% similarity
+                            </li>
+                          ))}
+                          {plagiarismResults.similarityScores.length > 3 && (
+                            <li>And {plagiarismResults.similarityScores.length - 3} more sources</li>
+                          )}
+                        </ul>
+                      </div>
+                    )}
+                    
+                    {plagiarismResults.isPlagiarized && (
+                      <p className="mt-3 font-medium">
+                        You can still submit this paper, but please be aware that the committee will review the plagiarism report
+                        during the approval process. Consider reviewing your document if significant plagiarism is detected.
+                      </p>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
             
             <div className="bg-yellow-50 border border-yellow-200 p-4 rounded-lg mb-6">
               <div className="flex items-start">
