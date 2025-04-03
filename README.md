@@ -4,6 +4,13 @@ Orion is a decentralized platform for academic paper submissions and peer review
 
 ## Features
 
+![Screenshot 2025-03-23 105320](https://github.com/user-attachments/assets/2d6965ce-fa35-4041-898e-8e83fdac4148)
+![Screenshot 2025-03-23 113159](https://github.com/user-attachments/assets/408b07f6-4901-4973-9af4-81e31565922e)
+![Screenshot 2025-03-23 113152](https://github.com/user-attachments/assets/d01f59b3-f583-460d-b218-2893aa928716)
+![Screenshot 2025-03-23 113245](https://github.com/user-attachments/assets/63759e52-a219-4378-838a-ddf227c0d9d7)
+![Screenshot 2025-03-23 113223](https://github.com/user-attachments/assets/adf7c39a-b160-45fe-8424-c92b4d1536a7)
+
+
 - 🔐 Secure authentication with role-based access control
 - 📄 Academic paper submission and review system
 - ⛓️ Blockchain integration for paper verification and staking
